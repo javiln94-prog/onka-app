@@ -458,9 +458,14 @@ function RelojEnVivo() {
 /* =================================================================
    PANTALLA 2 — IMPUTACIÓN DE HORAS
 ================================================================= */
+const CONCEPTOS_ESPECIALES = ["Baja médica", "Asuntos propios"];
+const ESPECIAL_COLOR = { "Baja médica": "#B3433A", "Asuntos propios": "#5B6BA8" };
+
 function opcionesDe(config, user) {
-  if (!config) return { proyectos: [], auxiliares: [] };
-  return { proyectos: config.projects.map((p) => ({ id: p.id, name: p.name })), auxiliares: user.role === "fabrica" ? config.auxTasks.map((t) => ({ id: t.id, name: t.name })) : [] };
+  if (!config) return { proyectos: [], auxiliares: [], especiales: [] };
+  const especiales = config.projects.filter((p) => CONCEPTOS_ESPECIALES.includes(p.name));
+  const proyectos = config.projects.filter((p) => !CONCEPTOS_ESPECIALES.includes(p.name)).map((p) => ({ id: p.id, name: p.name }));
+  return { proyectos, auxiliares: user.role === "fabrica" ? config.auxTasks.map((t) => ({ id: t.id, name: t.name })) : [], especiales };
 }
 
 function SelectorConcepto({ value, onChange, proyectos, auxiliares }) {
@@ -477,7 +482,8 @@ function ImputacionHoras({ api, user, config, showToast }) {
   const [filas, setFilas] = useState([]);
   const [excedentes, setExcedentes] = useState([]);
   const [historial, setHistorial] = useState([]);
-  const { proyectos, auxiliares } = useMemo(() => opcionesDe(config, user), [config, user]);
+  const [estadoEspecial, setEstadoEspecial] = useState(null); // null | "Baja médica" | "Asuntos propios"
+  const { proyectos, auxiliares, especiales } = useMemo(() => opcionesDe(config, user), [config, user]);
   const todasOpciones = useMemo(() => [...proyectos, ...auxiliares], [proyectos, auxiliares]);
   const cap = dailyCap(fecha);
 
@@ -485,7 +491,9 @@ function ImputacionHoras({ api, user, config, showToast }) {
     api("GET", "/api/imputaciones?date=" + f).then((rows) => {
       const principales = rows.filter((r) => !r.excedente);
       const extra = rows.filter((r) => r.excedente);
-      setFilas(principales.length ? principales.map((r) => ({ id: r.id, projectId: r.projectId, hours: String(r.hours) })) : [{ id: "n" + Math.random(), projectId: todasOpciones[0]?.id || "", hours: "" }]);
+      const especialEncontrado = principales.length === 1 && CONCEPTOS_ESPECIALES.includes(principales[0].projectName) ? principales[0].projectName : null;
+      setEstadoEspecial(especialEncontrado);
+      setFilas(!especialEncontrado && principales.length ? principales.map((r) => ({ id: r.id, projectId: r.projectId, hours: String(r.hours) })) : [{ id: "n" + Math.random(), projectId: todasOpciones[0]?.id || "", hours: "" }]);
       setExcedentes(extra.map((r) => ({ id: r.id, projectId: r.projectId, hours: String(r.hours) })));
     }).catch(() => {});
   }, [api, todasOpciones]);
@@ -501,6 +509,8 @@ function ImputacionHoras({ api, user, config, showToast }) {
   const removeFila = (id) => setFilas((f) => f.filter((x) => x.id !== id));
   const updateFila = (id, patch) => setFilas((f) => f.map((x) => (x.id === id ? { ...x, ...patch } : x)));
   const quickFill = (projectId) => setFilas([{ id: "n" + Math.random(), projectId, hours: String(cap) }]);
+
+  const toggleEspecial = (nombre) => setEstadoEspecial((actual) => (actual === nombre ? null : nombre));
 
   const redondear = (n) => Math.round(n * 100) / 100;
   const updateFilaHoras = (id, rawValue) => {
@@ -522,10 +532,17 @@ function ImputacionHoras({ api, user, config, showToast }) {
   const updateExcedente = (id, patch) => setExcedentes((f) => f.map((x) => (x.id === id ? { ...x, ...patch } : x)));
 
   const guardar = async () => {
-    if (excedeCap) { showToast(`Las horas de la jornada principal no pueden superar ${cap}h. Usa "Horas excedentes" para el resto.`); return; }
+    if (!estadoEspecial && excedeCap) { showToast(`Las horas de la jornada principal no pueden superar ${cap}h. Usa "Horas excedentes" para el resto.`); return; }
     const nombrePorId = (id) => todasOpciones.find((o) => o.id === id)?.name || "—";
+    let entriesPrincipales;
+    if (estadoEspecial) {
+      const item = especiales.find((e) => e.name === estadoEspecial);
+      entriesPrincipales = item && cap > 0 ? [{ projectId: item.id, projectName: item.name, hours: String(cap), excedente: false }] : [];
+    } else {
+      entriesPrincipales = filas.filter((f) => f.projectId && parseFloat(f.hours) > 0).map((f) => ({ projectId: f.projectId, projectName: nombrePorId(f.projectId), hours: f.hours, excedente: false }));
+    }
     const entries = [
-      ...filas.filter((f) => f.projectId && parseFloat(f.hours) > 0).map((f) => ({ projectId: f.projectId, projectName: nombrePorId(f.projectId), hours: f.hours, excedente: false })),
+      ...entriesPrincipales,
       ...excedentes.filter((f) => f.projectId && parseFloat(f.hours) > 0).map((f) => ({ projectId: f.projectId, projectName: nombrePorId(f.projectId), hours: f.hours, excedente: true })),
     ];
     try {
@@ -548,24 +565,50 @@ function ImputacionHoras({ api, user, config, showToast }) {
           </div>
           <input type="date" className="input mono" style={{ width: 170 }} value={fecha} onChange={(e) => setFecha(e.target.value)} />
         </div>
+
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "14px 0" }}>
-          <span style={{ fontSize: 12, color: "var(--muted)", alignSelf: "center", marginRight: 4 }}>Jornada completa rápida ({cap}h):</span>
-          {proyectos.slice(0, 4).map((o) => <button key={o.id} className="btn btn-ghost btn-sm" onClick={() => quickFill(o.id)}>{o.name}</button>)}
+          {especiales.map((esp) => {
+            const color = ESPECIAL_COLOR[esp.name] || "#666";
+            const activo = estadoEspecial === esp.name;
+            return (
+              <button
+                key={esp.id}
+                onClick={() => toggleEspecial(esp.name)}
+                className="btn btn-sm"
+                style={{ background: activo ? color : color + "18", color: activo ? "#fff" : color, border: `1px solid ${color}55`, fontWeight: 700 }}
+              >
+                {activo && <Check size={13} />} {esp.name}
+              </button>
+            );
+          })}
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {filas.map((f) => (
-            <div key={f.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <SelectorConcepto value={f.projectId} onChange={(v) => updateFila(f.id, { projectId: v })} proyectos={proyectos} auxiliares={auxiliares} />
-              <input className="input mono" style={{ width: 92 }} type="number" step="0.25" min="0" max={cap} placeholder="h" value={f.hours} onChange={(e) => updateFilaHoras(f.id, e.target.value)} />
-              <button className="btn btn-danger btn-sm" onClick={() => removeFila(f.id)}><Trash2 size={14} /></button>
+
+        {estadoEspecial ? (
+          <div style={{ padding: "12px 14px", borderRadius: 10, background: (ESPECIAL_COLOR[estadoEspecial] || "#666") + "14", border: `1px solid ${(ESPECIAL_COLOR[estadoEspecial] || "#666")}40`, fontSize: 13, color: ESPECIAL_COLOR[estadoEspecial] }}>
+            Día marcado como <strong>{estadoEspecial}</strong>{cap > 0 ? ` — se registrarán ${cap}h bajo este concepto.` : " — este día no tiene jornada principal (fin de semana)."} Vuelve a pulsar el botón para quitar la marca.
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "14px 0" }}>
+              <span style={{ fontSize: 12, color: "var(--muted)", alignSelf: "center", marginRight: 4 }}>Jornada completa rápida ({cap}h):</span>
+              {proyectos.slice(0, 4).map((o) => <button key={o.id} className="btn btn-ghost btn-sm" onClick={() => quickFill(o.id)}>{o.name}</button>)}
             </div>
-          ))}
-        </div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14 }}>
-          <button className="btn btn-ghost btn-sm" onClick={addFila}><Plus size={14} /> Añadir concepto</button>
-          <div style={{ fontSize: 13, fontWeight: 700 }}>Total: <span className="mono" style={{ color: excedeCap ? "var(--warn)" : "var(--ink)" }}>{totalPrincipal}h</span> <span style={{ color: "var(--muted)", fontWeight: 400 }}>/ {cap}h</span></div>
-        </div>
-        {excedeCap && <div style={{ marginTop: 10, fontSize: 12.5, color: "var(--warn)", display: "flex", gap: 6, alignItems: "flex-start" }}><AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} /><span>Superas el máximo de {cap}h para este día. Mueve el resto a "Horas excedentes" más abajo.</span></div>}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {filas.map((f) => (
+                <div key={f.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <SelectorConcepto value={f.projectId} onChange={(v) => updateFila(f.id, { projectId: v })} proyectos={proyectos} auxiliares={auxiliares} />
+                  <input className="input mono" style={{ width: 92 }} type="number" step="0.25" min="0" max={cap} placeholder="h" value={f.hours} onChange={(e) => updateFilaHoras(f.id, e.target.value)} />
+                  <button className="btn btn-danger btn-sm" onClick={() => removeFila(f.id)}><Trash2 size={14} /></button>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14 }}>
+              <button className="btn btn-ghost btn-sm" onClick={addFila}><Plus size={14} /> Añadir concepto</button>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>Total: <span className="mono" style={{ color: excedeCap ? "var(--warn)" : "var(--ink)" }}>{totalPrincipal}h</span> <span style={{ color: "var(--muted)", fontWeight: 400 }}>/ {cap}h</span></div>
+            </div>
+            {excedeCap && <div style={{ marginTop: 10, fontSize: 12.5, color: "var(--warn)", display: "flex", gap: 6, alignItems: "flex-start" }}><AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} /><span>Superas el máximo de {cap}h para este día. Mueve el resto a "Horas excedentes" más abajo.</span></div>}
+          </>
+        )}
       </div>
 
       <div className="card" style={{ borderColor: "#EAD9BE", background: "#FBF6EE" }}>
