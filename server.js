@@ -191,10 +191,21 @@ async function auth(req) {
 }
 function isAdmin(session) { return !!session && session.role === "admin"; }
 
-const todayISO = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-};
+// El servidor puede estar corriendo en UTC (p. ej. en Render). Calculamos
+// siempre la fecha/hora en el huso horario de España, con cambio de hora
+// de verano/invierno automático, para que el fichaje registre la hora real.
+function madridParts(date = new Date()) {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Madrid",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  });
+  const parts = fmt.formatToParts(date);
+  const get = (type) => parts.find((p) => p.type === type).value;
+  return { date: `${get("year")}-${get("month")}-${get("day")}`, time: `${get("hour")}:${get("minute")}:${get("second")}` };
+}
+
+const todayISO = () => madridParts().date;
 
 // Límite de horas de la jornada principal: L-J 8.5h, V 5h, fin de semana 0h
 function dailyCap(dateISO) {
@@ -379,11 +390,11 @@ async function handleApi(req, res, pathname, query) {
     const me = data.users.find((u) => u.id === session.userId);
     const body = await readBody(req);
     const now = new Date();
-    const pad2 = (n) => String(n).padStart(2, "0");
+    const { date: hoyMadrid, time: horaMadrid } = madridParts(now);
     const record = {
       id: uid(), userId: session.userId, userName: me ? me.name : "—",
       type: body.type === "salida" ? "salida" : "entrada",
-      date: todayISO(), time: `${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`,
+      date: hoyMadrid, time: horaMadrid,
       timestamp: now.toISOString(),
       lat: typeof body.lat === "number" ? body.lat : null,
       lng: typeof body.lng === "number" ? body.lng : null,
@@ -487,3 +498,4 @@ server.listen(PORT, () => {
     console.log("Almacenamiento: archivo local (data/data.json) — Upstash NO detectado. Revisa las variables de entorno UPSTASH_REDIS_REST_URL y UPSTASH_REDIS_REST_TOKEN si esto es producción.");
   }
 });
+
