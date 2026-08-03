@@ -1,0 +1,12 @@
+{
+  "name": "onka-control-horario",
+  "version": "1.0.0",
+  "description": "ONKA — Control horario, imputación de horas y calendario",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
