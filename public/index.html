@@ -142,6 +142,31 @@ async function reverseGeocode(lat, lng) {
 /* =================================================================
    APP
 ================================================================= */
+/* =================================================================
+   Capturador de errores — evita pantallas en blanco: si algo falla
+   de forma inesperada, muestra el motivo en vez de romper toda la app.
+================================================================= */
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error("Error de la app:", error, info); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, background: "var(--paper, #F6F4EF)", fontFamily: "sans-serif" }}>
+          <div style={{ maxWidth: 480, textAlign: "center" }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>⚠️</div>
+            <h2 style={{ marginBottom: 8 }}>Algo ha fallado</h2>
+            <p style={{ color: "#726E64", fontSize: 14, marginBottom: 16 }}>{String(this.state.error.message || this.state.error)}</p>
+            <button onClick={() => window.location.reload()} style={{ padding: "10px 18px", borderRadius: 9, border: "none", background: "#0A0A0A", color: "#fff", fontWeight: 600, cursor: "pointer" }}>Recargar la página</button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function App() {
   const [token, setToken] = useState(() => localStorage.getItem("onka_token") || null);
   const [user, setUser] = useState(() => { try { return JSON.parse(localStorage.getItem("onka_user")); } catch (e) { return null; } });
@@ -195,7 +220,16 @@ function Login({ onLogin }) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    fetch("/api/public-users").then((r) => r.json()).then((list) => { setUsers(list); if (list.length) setSelected(list[0].id); }).catch(() => setError("No se pudo conectar con el servidor."));
+    fetch("/api/public-users")
+      .then(async (r) => {
+        const data = await r.json().catch(() => null);
+        if (!r.ok || !Array.isArray(data)) {
+          throw new Error((data && data.error) || `El servidor respondió con un error (${r.status}). Avisa al administrador.`);
+        }
+        return data;
+      })
+      .then((list) => { setUsers(list); if (list.length) setSelected(list[0].id); })
+      .catch((e) => setError(e.message || "No se pudo conectar con el servidor."));
   }, []);
 
   const submit = async (e) => {
@@ -995,7 +1029,7 @@ const Briefcase = (p) => <Icon {...p}><rect x="2" y="7" width="20" height="14" r
 const BellRing = (p) => <Icon {...p}><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /><path d="M4 2C2.8 3 2 4.5 2 6" /><path d="M22 6c0-1.5-.8-3-2-4" /></Icon>;
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(<App />);
+root.render(<ErrorBoundary><App /></ErrorBoundary>);
 </script>
 </body>
 </html>
