@@ -79,13 +79,19 @@ function migrate(data) {
 // -----------------------------------------------------------------
 async function redisGet(key) {
   const r = await fetch(`${REDIS_URL}/get/${encodeURIComponent(key)}`, { headers: { Authorization: `Bearer ${REDIS_TOKEN}` } });
-  if (!r.ok) throw new Error("No se pudo leer de Upstash (revisa las variables de entorno)");
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error(`Upstash respondió ${r.status} al leer: ${body || "(sin detalle)"}`);
+  }
   const j = await r.json();
   return j.result; // string guardado, o null si no existe
 }
 async function redisSet(key, value) {
   const r = await fetch(`${REDIS_URL}/set/${encodeURIComponent(key)}`, { method: "POST", headers: { Authorization: `Bearer ${REDIS_TOKEN}` }, body: value });
-  if (!r.ok) throw new Error("No se pudo guardar en Upstash (revisa las variables de entorno)");
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error(`Upstash respondió ${r.status} al guardar: ${body || "(sin detalle)"}`);
+  }
 }
 
 // -----------------------------------------------------------------
