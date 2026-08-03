@@ -89,36 +89,33 @@ async function redisSet(key, value) {
 }
 
 // -----------------------------------------------------------------
-// Almacenamiento con caché en memoria + cola de escritura
+// Almacenamiento — SIEMPRE lee el dato más reciente en cada petición (nada
+// de caché entre peticiones), para evitar que quede una copia obsoleta en
+// memoria si el proceso se reinicia o hay más de una instancia sirviendo
+// peticiones a la vez.
 // -----------------------------------------------------------------
 let writeQueue = Promise.resolve();
-let cache = null;
 
 async function loadData() {
-  if (cache) return cache;
   if (USING_REDIS) {
     const raw = await redisGet(REDIS_KEY);
-    if (raw) {
-      cache = migrate(JSON.parse(raw));
-    } else {
-      cache = seedData();
-      await redisSet(REDIS_KEY, JSON.stringify(cache));
-    }
-  } else {
-    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    if (!fs.existsSync(DATA_FILE)) {
-      cache = seedData();
-      fs.writeFileSync(DATA_FILE, JSON.stringify(cache, null, 2));
-    } else {
-      cache = migrate(JSON.parse(fs.readFileSync(DATA_FILE, "utf8")));
-      fs.writeFileSync(DATA_FILE, JSON.stringify(cache, null, 2));
-    }
+    if (raw) return migrate(JSON.parse(raw));
+    const seed = seedData();
+    await redisSet(REDIS_KEY, JSON.stringify(seed));
+    return seed;
   }
-  return cache;
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (!fs.existsSync(DATA_FILE)) {
+    const seed = seedData();
+    fs.writeFileSync(DATA_FILE, JSON.stringify(seed, null, 2));
+    return seed;
+  }
+  const data = migrate(JSON.parse(fs.readFileSync(DATA_FILE, "utf8")));
+  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+  return data;
 }
 
 async function saveData(data) {
-  cache = data;
   if (USING_REDIS) {
     await redisSet(REDIS_KEY, JSON.stringify(data));
   } else {
