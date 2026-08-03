@@ -26,8 +26,8 @@ const DATA_FILE = path.join(DATA_DIR, "data.json");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const PORT = process.env.PORT || 3000;
 
-const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL || "";
-const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || "";
+const REDIS_URL = (process.env.UPSTASH_REDIS_REST_URL || "").trim().replace(/\/+$/, "");
+const REDIS_TOKEN = (process.env.UPSTASH_REDIS_REST_TOKEN || "").trim();
 const USING_REDIS = !!(REDIS_URL && REDIS_TOKEN);
 const REDIS_KEY = "onka-data";
 
@@ -476,4 +476,11 @@ const server = http.createServer(async (req, res) => {
   serveStatic(req, res, pathname);
 });
 
-server.listen(PORT, () => console.log(`ONKA escuchando en http://localhost:${PORT}`));
+server.listen(PORT, () => {
+  console.log(`ONKA escuchando en http://localhost:${PORT}`);
+  if (USING_REDIS) {
+    console.log(`Almacenamiento: Upstash (${REDIS_URL}) — token de ${REDIS_TOKEN.length} caracteres, empieza por "${REDIS_TOKEN.slice(0, 4)}..."`);
+  } else {
+    console.log("Almacenamiento: archivo local (data/data.json) — Upstash NO detectado. Revisa las variables de entorno UPSTASH_REDIS_REST_URL y UPSTASH_REDIS_REST_TOKEN si esto es producción.");
+  }
+});
