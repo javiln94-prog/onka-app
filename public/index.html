@@ -266,7 +266,7 @@ function App() {
 
   useEffect(() => { if (token) { refreshConfig(); refreshEvents(); } }, [token]); // eslint-disable-line
 
-  const onLogin = (u, t) => { setUser(u); setToken(t); storage.set("onka_token", t); storage.set("onka_user", JSON.stringify(u)); };
+  const onLogin = (u, t) => { setUser(u); setToken(t); setTab("fichaje"); storage.set("onka_token", t); storage.set("onka_user", JSON.stringify(u)); };
   const onLogout = () => { api("POST", "/api/logout").catch(() => {}); logout(); };
 
   return (
@@ -291,6 +291,7 @@ function Login({ onLogin }) {
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [frase, setFrase] = useState(null);
 
   useEffect(() => {
     fetch("/api/public-users")
@@ -303,6 +304,7 @@ function Login({ onLogin }) {
       })
       .then((list) => { setUsers(list); if (list.length) setSelected(list[0].id); })
       .catch((e) => setError(e.message || "No se pudo conectar con el servidor."));
+    fetch("/api/frase-actual").then((r) => r.json()).then((d) => setFrase(d.texto || null)).catch(() => {});
   }, []);
 
   const submit = async (e) => {
@@ -319,7 +321,7 @@ function Login({ onLogin }) {
   };
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, background: "var(--primary)" }}>
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 20, background: "var(--primary)", gap: 20 }}>
       <form onSubmit={submit} className="card" style={{ width: 380, maxWidth: "100%", background: "#111", border: "1px solid #2A2A2A", padding: 32 }}>
         <div style={{ marginBottom: 30, textAlign: "center" }}>
           <img src={ONKA_LOGO_PLACEHOLDER} alt="ONKA" style={{ width: 230, maxWidth: "100%", display: "block", margin: "0 auto" }} />
@@ -337,6 +339,11 @@ function Login({ onLogin }) {
         {error && <div style={{ color: "#E8845A", fontSize: 12.5, marginTop: 8 }}>{error}</div>}
         <button className="btn btn-accent" style={{ width: "100%", justifyContent: "center", marginTop: 16 }} type="submit" disabled={busy}>{busy ? "Entrando…" : "Entrar"}</button>
       </form>
+      {frase && (
+        <div style={{ maxWidth: 380, textAlign: "center", padding: "0 16px" }}>
+          <p style={{ color: "#B8B4AA", fontSize: 13.5, fontStyle: "italic", lineHeight: 1.5, margin: 0 }}>"{frase}"</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -382,9 +389,7 @@ function Shell({ user, api, tab, setTab, onLogout, config, refreshConfig, events
       </div>
 
       <div style={{ padding: 20, maxWidth: 1080, margin: "0 auto" }}>
-        {!isAdmin && <AlertaFichaje misFichajes={misFichajes} events={events} />}
-        <AlertaEventos events={events} user={user} />
-        {tab === "fichaje" && <Fichaje api={api} user={user} misFichajes={misFichajes} refresh={refreshMisFichajes} showToast={showToast} />}
+        {tab === "fichaje" && <Fichaje api={api} user={user} misFichajes={misFichajes} refresh={refreshMisFichajes} showToast={showToast} events={events} />}
         {tab === "horas" && <ImputacionHoras api={api} user={user} config={config} showToast={showToast} />}
         {tab === "calendario" && <Calendario api={api} user={user} events={events} refreshEvents={refreshEvents} config={config} />}
         {tab === "admin" && puedeGestion && <Admin api={api} config={config} refreshConfig={refreshConfig} showToast={showToast} isAdmin={isAdmin} puedeProyectos={puedeProyectos} puedeAuxiliar={puedeAuxiliar} />}
@@ -396,72 +401,20 @@ function Shell({ user, api, tab, setTab, onLogout, config, refreshConfig, events
 /* =================================================================
    ALERTAS
 ================================================================= */
-function esDiaLaborable(events, isoDate) {
-  if (isWeekend(isoDate)) return false;
-  const evento = events.find((e) => e.date === isoDate && (e.type === "vacaciones" || (e.type === "festivo" && (e.festivoScope === "nacional" || e.festivoScope === "autonomico"))));
-  return !evento;
-}
-function AlertaFichaje({ misFichajes, events }) {
-  const iso = todayISO();
-  if (!esDiaLaborable(events, iso)) return null;
-  if (new Date().getHours() < 10) return null;
-  const entradaHoy = misFichajes.some((f) => f.type === "entrada" && f.date === iso);
-  if (entradaHoy) return null;
-  return (
-    <div className="card" style={{ borderColor: "#F0C9A8", background: "#FFF6EC", marginBottom: 16, display: "flex", gap: 10, alignItems: "flex-start" }}>
-      <AlertTriangle size={18} color="var(--warn)" style={{ flexShrink: 0, marginTop: 2 }} />
-      <div>
-        <div style={{ fontWeight: 700, fontSize: 13.5 }}>Todavía no has fichado tu entrada hoy</div>
-        <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Es un día laborable y no hay registro de entrada. Ficha en cuanto puedas.</div>
-      </div>
-    </div>
-  );
-}
-
-function AlertaEventos({ events, user }) {
-  const [dismissed, setDismissed] = useState([]);
-  const activos = useMemo(() => {
-    const now = new Date();
-    return events.filter((e) => {
-      if (!e.alerta || !e.alerta.activa) return false;
-      if (e.invitados !== "todos" && !(Array.isArray(e.invitados) && e.invitados.includes(user.id))) return false;
-      const dt = new Date(`${e.date}T${e.time || "09:00"}:00`);
-      const windowStart = new Date(dt.getTime() - (e.alerta.minutosAntes || 0) * 60000);
-      return now >= windowStart && now <= dt;
-    });
-  }, [events, user.id]);
-
-  const visibles = activos.filter((e) => !dismissed.includes(e.id));
-  if (visibles.length === 0) return null;
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
-      {visibles.map((e) => (
-        <div key={e.id} className="card" style={{ borderColor: "#CFE0D6", background: "#EEF6F1", display: "flex", gap: 10, alignItems: "flex-start" }}>
-          <BellRing size={18} color="var(--ok)" style={{ flexShrink: 0, marginTop: 2 }} />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 700, fontSize: 13.5 }}>Recordatorio: {e.title}</div>
-            <div style={{ fontSize: 12.5, color: "var(--muted)" }}>
-              {e.time ? `Hoy a las ${e.time}` : "Hoy"}{e.location ? ` · ${e.location}` : ""}
-            </div>
-          </div>
-          <button className="btn btn-ghost btn-sm" onClick={() => setDismissed((d) => [...d, e.id])}><X size={13} /></button>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 /* =================================================================
    PANTALLA 1 — FICHAJE
 ================================================================= */
-function Fichaje({ api, user, misFichajes, refresh, showToast }) {
+function Fichaje({ api, user, misFichajes, refresh, showToast, events }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
 
   const sorted = useMemo(() => [...misFichajes].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1)), [misFichajes]);
   const ultimoHoy = sorted.find((f) => f.date === todayISO());
   const proximaAccion = !ultimoHoy || ultimoHoy.type === "salida" ? "entrada" : "salida";
+
+  const en30Dias = useMemo(() => { const d = new Date(); d.setDate(d.getDate() + 30); return toISODate(d); }, []);
+  const proximosEventos = useMemo(() => (events || []).filter((e) => e.date >= todayISO() && e.date <= en30Dias).sort((a, b) => (a.date === b.date ? (a.time || "").localeCompare(b.time || "") : (a.date > b.date ? 1 : -1))), [events, en30Dias]);
 
   const fichar = async () => {
     setBusy(true); setMsg(null);
@@ -510,6 +463,22 @@ function Fichaje({ api, user, misFichajes, refresh, showToast }) {
       </div>
 
       <div className="card">
+        <h3 style={{ fontSize: 14, marginBottom: 10 }}>Próximos eventos (30 días)</h3>
+        {proximosEventos.length === 0 ? (
+          <div style={{ color: "var(--muted)", fontSize: 13 }}>No tienes eventos próximos.</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {proximosEventos.map((e) => (
+              <div key={e.id} style={{ borderLeft: `3px solid ${colorDeEvento(e)}`, paddingLeft: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 700 }}>{e.title || TIPO_EVENTO[e.type].label}</div>
+                <div className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>{e.date}{e.time ? " · " + e.time : ""}{e.location ? " · " + e.location : ""}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="card">
         <h3 style={{ fontSize: 14, marginBottom: 10 }}>Horario de la empresa</h3>
         <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 13 }}>
           <div><strong>Lunes a jueves:</strong> 8:00–10:00 · <span style={{ color: "var(--muted)" }}>10:00–10:30 almuerzo</span> · 10:30–14:00 · <span style={{ color: "var(--muted)" }}>14:00–15:00 comida</span> · 15:00–18:00</div>
@@ -539,9 +508,10 @@ const ESPECIAL_COLOR = { "Baja médica": "#B3433A", "Asuntos propios": "#5B6BA8"
 
 function opcionesDe(config, user) {
   if (!config) return { proyectos: [], auxiliares: [], especiales: [] };
+  const ordenar = (list) => [...list].sort((a, b) => (a.fixed === b.fixed ? 0 : a.fixed ? 1 : -1));
   const especiales = config.projects.filter((p) => CONCEPTOS_ESPECIALES.includes(p.name));
-  const proyectos = config.projects.filter((p) => !CONCEPTOS_ESPECIALES.includes(p.name)).map((p) => ({ id: p.id, name: p.name, fixed: !!p.fixed }));
-  const auxiliares = user.role === "fabrica" ? config.auxTasks.map((t) => ({ id: t.id, name: t.name, fixed: !!t.fixed })) : [];
+  const proyectos = ordenar(config.projects.filter((p) => !CONCEPTOS_ESPECIALES.includes(p.name)).map((p) => ({ id: p.id, name: p.name, fixed: !!p.fixed })));
+  const auxiliares = user.role === "fabrica" ? ordenar(config.auxTasks.map((t) => ({ id: t.id, name: t.name, fixed: !!t.fixed }))) : [];
   return { proyectos, auxiliares, especiales };
 }
 
@@ -798,8 +768,10 @@ function ImputacionHoras({ api, user, config, showToast }) {
 /* =================================================================
    PANTALLA 3 — CALENDARIO
 ================================================================= */
-const TIPO_EVENTO = { festivo: { label: "Festivo", color: "#C1440E" }, vacaciones: { label: "Vacaciones", color: "#3B6FA0" }, evento: { label: "Evento", color: "#8A5A2B" } };
+const TIPO_EVENTO = { festivo: { label: "Festivo", color: "#C1440E" }, vacaciones: { label: "Vacaciones", color: "#3B6FA0" }, evento: { label: "Evento", color: "#5B6BA8" } };
 const AMBITO_LABEL = { nacional: "Nacional", autonomico: "Autonómico", local: "Local" };
+const COLOR_FESTIVO_AMBITO = { nacional: "#C1440E", autonomico: "#B98A2E", local: "#6B5B45" };
+const colorDeEvento = (e) => (e.type === "festivo" ? (COLOR_FESTIVO_AMBITO[e.festivoScope] || COLOR_FESTIVO_AMBITO.nacional) : TIPO_EVENTO[e.type].color);
 
 function Calendario({ api, user, events, refreshEvents, config }) {
   const [cursor, setCursor] = useState(new Date());
@@ -828,27 +800,34 @@ function Calendario({ api, user, events, refreshEvents, config }) {
             if (d === null) return <div key={idx} />;
             const iso = `${year}-${pad(month + 1)}-${pad(d)}`;
             const evs = eventosDe(iso); const finde = isWeekend(iso); const esHoy = iso === todayISO();
-            const visibles = evs.slice(0, 2); const resto = evs.length - visibles.length;
+            const diaCompletoEv = evs.find((e) => e.type === "vacaciones") || evs.find((e) => e.type === "festivo" && (e.festivoScope === "nacional" || e.festivoScope === "autonomico"));
+            const colorFondo = diaCompletoEv ? colorDeEvento(diaCompletoEv) : null;
+            const tagsLinea = evs.filter((e) => e !== diaCompletoEv);
+            const visibles = tagsLinea.slice(0, 2); const resto = tagsLinea.length - visibles.length;
             return (
-              <div key={idx} className="cal-cell" onClick={() => setDiaSel(iso)} style={{ border: esHoy ? "2px solid var(--primary)" : "1px solid var(--line)", background: finde ? "#FAFAF8" : "#fff" }}>
-                <div className="mono" style={{ fontSize: 11, color: finde ? "var(--muted)" : "var(--ink)" }}>{d}</div>
-                {visibles.map((e) => <div key={e.id} className="cal-tag" style={{ background: TIPO_EVENTO[e.type].color + "22", color: TIPO_EVENTO[e.type].color }}>{e.time ? e.time + " " : ""}{e.title || TIPO_EVENTO[e.type].label}</div>)}
+              <div key={idx} className="cal-cell" onClick={() => setDiaSel(iso)} style={{ border: esHoy ? "2px solid var(--primary)" : "1px solid var(--line)", background: colorFondo ? colorFondo + "30" : (finde ? "#FAFAF8" : "#fff") }}>
+                <div className="mono" style={{ fontSize: 11, color: finde && !colorFondo ? "var(--muted)" : "var(--ink)", fontWeight: colorFondo ? 700 : 400 }}>{d}</div>
+                {visibles.map((e) => <div key={e.id} className="cal-tag" style={{ background: colorDeEvento(e) + "22", color: colorDeEvento(e) }}>{e.time ? e.time + " " : ""}{e.title || TIPO_EVENTO[e.type].label}</div>)}
                 {resto > 0 && <div className="cal-tag" style={{ background: "#EEECE6", color: "var(--muted)" }}>+{resto} más</div>}
               </div>
             );
           })}
         </div>
         <div style={{ display: "flex", gap: 14, marginTop: 14, fontSize: 12, flexWrap: "wrap" }}>
-          {Object.entries(TIPO_EVENTO).map(([k, v]) => <div key={k} style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 3, background: v.color, display: "inline-block" }} /> {v.label}</div>)}
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 3, background: COLOR_FESTIVO_AMBITO.nacional, display: "inline-block" }} /> Festivo nacional</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 3, background: COLOR_FESTIVO_AMBITO.autonomico, display: "inline-block" }} /> Festivo autonómico</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 3, background: TIPO_EVENTO.vacaciones.color, display: "inline-block" }} /> Vacaciones</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 3, background: COLOR_FESTIVO_AMBITO.local, display: "inline-block" }} /> Festivo local</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 3, background: TIPO_EVENTO.evento.color, display: "inline-block" }} /> Evento</div>
         </div>
-        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 10 }}>Toca cualquier día para ver el detalle{puedeGestionar ? " o añadir un evento" : ""}.</div>
+        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 10 }}>Toca cualquier día para ver el detalle{puedeGestionar ? " o añadir un evento" : ""}. Los festivos nacionales/autonómicos y las vacaciones colorean todo el día; el festivo local aparece como aviso.</div>
       </div>
 
       <div className="card">
         <h3 style={{ fontSize: 14, marginBottom: 10 }}>Próximos eventos</h3>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 420, overflowY: "auto" }} className="scrollbar">
           {events.filter((e) => e.date >= todayISO()).sort((a, b) => (a.date > b.date ? 1 : -1)).slice(0, 20).map((e) => (
-            <div key={e.id} style={{ borderLeft: `3px solid ${TIPO_EVENTO[e.type].color}`, paddingLeft: 8, cursor: "pointer" }} onClick={() => setDiaSel(e.date)}>
+            <div key={e.id} style={{ borderLeft: `3px solid ${colorDeEvento(e)}`, paddingLeft: 8, cursor: "pointer" }} onClick={() => setDiaSel(e.date)}>
               <div style={{ fontSize: 12.5, fontWeight: 700 }}>{e.title || TIPO_EVENTO[e.type].label}</div>
               <div className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>{e.date}{e.time ? " · " + e.time : ""} · {TIPO_EVENTO[e.type].label}</div>
             </div>
@@ -897,11 +876,12 @@ function DayModal({ fecha, eventos, isAdmin, users, onClose, onAdd, onDelete }) 
 
 function EventoDetalle({ e, users, isAdmin, onDelete }) {
   const info = TIPO_EVENTO[e.type];
+  const color = colorDeEvento(e);
   return (
     <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
         <div>
-          <span className="pill" style={{ background: info.color + "22", color: info.color }}>{info.label}</span>
+          <span className="pill" style={{ background: color + "22", color: color }}>{info.label}{e.type === "festivo" ? ` · ${AMBITO_LABEL[e.festivoScope] || "Nacional"}` : ""}</span>
           <div style={{ fontWeight: 700, fontSize: 14, marginTop: 6 }}>{e.title || info.label}</div>
         </div>
         {isAdmin && <button className="btn btn-danger btn-sm" onClick={() => onDelete(e.id)}><Trash2 size={13} /></button>}
@@ -911,7 +891,6 @@ function EventoDetalle({ e, users, isAdmin, onDelete }) {
         {e.location && <div>📍 {e.location}</div>}
         {e.type === "festivo" && <div>{AMBITO_LABEL[e.festivoScope] || "Nacional"}{e.festivoLugar ? ` · ${e.festivoLugar}` : ""}{(e.festivoScope === "local") ? " · no exime de fichar a quien no sea de esa localidad" : ""}</div>}
         {e.type === "evento" && <div>👥 {e.invitados === "todos" ? "Todos los trabajadores" : (e.invitados || []).map((id) => nombreUsuario(users, id)).join(", ") || "Sin convocados"}</div>}
-        {e.alerta && e.alerta.activa && <div>🔔 Aviso {OPCIONES_AVISO.find((o) => o.value === e.alerta.minutosAntes)?.label || `${e.alerta.minutosAntes} min antes`}</div>}
       </div>
       {e.description && <div style={{ fontSize: 13, marginTop: 10, borderTop: "1px solid var(--line)", paddingTop: 10, whiteSpace: "pre-wrap" }}>{e.description}</div>}
     </div>
@@ -926,8 +905,6 @@ function FormularioEvento({ users, onCancel, onSave }) {
   const [descripcion, setDescripcion] = useState("");
   const [todos, setTodos] = useState(true);
   const [seleccionados, setSeleccionados] = useState([]);
-  const [avisoActivo, setAvisoActivo] = useState(false);
-  const [minutosAntes, setMinutosAntes] = useState(60);
   const [ambito, setAmbito] = useState("nacional");
   const [festivoLugar, setFestivoLugar] = useState("");
 
@@ -938,7 +915,6 @@ function FormularioEvento({ users, onCancel, onSave }) {
     if (tipo === "evento") {
       ev.time = hora || null; ev.location = lugar; ev.description = descripcion;
       ev.invitados = todos ? "todos" : seleccionados;
-      ev.alerta = { activa: avisoActivo, minutosAntes };
     }
     if (tipo === "festivo") { ev.festivoScope = ambito; ev.festivoLugar = ambito === "nacional" ? "" : festivoLugar; }
     onSave(ev);
@@ -992,12 +968,6 @@ function FormularioEvento({ users, onCancel, onSave }) {
             </div>
           )}
 
-          <div className="checkrow" style={{ marginTop: 12 }}><input type="checkbox" checked={avisoActivo} onChange={(e) => setAvisoActivo(e.target.checked)} id="aviso-cb" /><label htmlFor="aviso-cb">Avisar a los convocados</label></div>
-          {avisoActivo && (
-            <select className="input" style={{ marginTop: 6 }} value={minutosAntes} onChange={(e) => setMinutosAntes(Number(e.target.value))}>
-              {OPCIONES_AVISO.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          )}
         </>
       )}
 
@@ -1018,6 +988,7 @@ function Admin({ api, config, refreshConfig, showToast, isAdmin, puedeProyectos,
     isAdmin && ["usuarios", "Usuarios", <Users size={14} key="u" />],
     puedeProyectos && ["proyectos", "Proyectos", <Briefcase size={14} key="p" />],
     puedeAuxiliar && ["auxiliar", "Auxiliares", <Cog size={14} key="a" />],
+    isAdmin && ["frases", "Frase motivacional", <BellRing size={14} key="f" />],
   ].filter(Boolean);
   const [sub, setSub] = useState(tabsDisponibles[0]?.[0] || "proyectos");
   return (
@@ -1031,6 +1002,7 @@ function Admin({ api, config, refreshConfig, showToast, isAdmin, puedeProyectos,
       {sub === "usuarios" && isAdmin && <GestionUsuarios api={api} refreshConfig={refreshConfig} showToast={showToast} />}
       {sub === "proyectos" && puedeProyectos && <GestionFamilia api={api} config={config} refreshConfig={refreshConfig} showToast={showToast} familia="proyectos" />}
       {sub === "auxiliar" && puedeAuxiliar && <GestionFamilia api={api} config={config} refreshConfig={refreshConfig} showToast={showToast} familia="auxiliares" />}
+      {sub === "frases" && isAdmin && <GestionFrases api={api} showToast={showToast} />}
     </div>
   );
 }
@@ -1049,19 +1021,72 @@ function Informes({ api }) {
   }, [api, desde, hasta]);
   useEffect(() => { cargar(); }, [cargar]);
 
+  const diasDelRango = () => {
+    const dias = [];
+    let d = new Date(desde + "T00:00:00");
+    const fin = new Date(hasta + "T00:00:00");
+    while (d <= fin) { dias.push(toISODate(d)); d.setDate(d.getDate() + 1); }
+    return dias;
+  };
+  const claveDia = (iso) => { const [, m, dd] = iso.split("-"); return dd + "/" + m; };
+
+  const pivotHorasPorTrabajador = () => {
+    const dias = diasDelRango();
+    const trabajadores = [...new Set(imputaciones.map((i) => i.userName))].sort();
+    const filas = [];
+    trabajadores.forEach((nombre) => {
+      [["normal", "Horas normales"], ["excedente", "Horas excedentes"]].forEach(([tipo, etiqueta]) => {
+        const fila = { Trabajador: nombre, Tipo: etiqueta };
+        let total = 0;
+        dias.forEach((f) => {
+          const suma = imputaciones.filter((i) => i.userName === nombre && i.date === f && (tipo === "excedente" ? i.excedente : !i.excedente)).reduce((s, i) => s + i.hours, 0);
+          if (suma > 0) { fila[claveDia(f)] = suma; total += suma; } else { fila[claveDia(f)] = ""; }
+        });
+        fila["Total"] = total;
+        if (total > 0) filas.push(fila);
+      });
+    });
+    return filas;
+  };
+
+  const pivotPorConcepto = () => {
+    const conceptos = [...new Set(imputaciones.map((i) => i.projectName))].sort();
+    const trabajadores = [...new Set(imputaciones.map((i) => i.userName))].sort();
+    return conceptos.map((concepto) => {
+      const fila = { Concepto: concepto };
+      let total = 0;
+      trabajadores.forEach((t) => {
+        const suma = imputaciones.filter((i) => i.projectName === concepto && i.userName === t).reduce((s, i) => s + i.hours, 0);
+        fila[t] = suma > 0 ? suma : "";
+        total += suma;
+      });
+      fila["Total"] = total;
+      return fila;
+    });
+  };
+
   const exportarExcel = () => {
     const wb = XLSX.utils.book_new();
-    const wsFichajes = XLSX.utils.json_to_sheet(fichajes.map((f) => ({ Usuario: f.userName, Fecha: f.date, Hora: f.time, Tipo: f.type, Latitud: f.lat, Longitud: f.lng, Ubicación: f.locationLabel || "" })));
+    const wsHorasDia = XLSX.utils.json_to_sheet(pivotHorasPorTrabajador());
+    XLSX.utils.book_append_sheet(wb, wsHorasDia, "Horas por trabajador y día");
+    const wsConcepto = XLSX.utils.json_to_sheet(pivotPorConcepto());
+    XLSX.utils.book_append_sheet(wb, wsConcepto, "Imputación por concepto");
+    const wsFichajes = XLSX.utils.json_to_sheet([...fichajes].sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1)).map((f) => ({ Usuario: f.userName, Fecha: f.date, Hora: f.time, Tipo: f.type + (f.automatico ? " (auto)" : ""), Ubicación: f.locationLabel || "" })));
     XLSX.utils.book_append_sheet(wb, wsFichajes, "Fichajes");
-    const wsImput = XLSX.utils.json_to_sheet(imputaciones.map((i) => ({ Usuario: i.userName, Fecha: i.date, Concepto: i.projectName, Horas: i.hours, Excedente: i.excedente ? "Sí" : "No" })));
-    XLSX.utils.book_append_sheet(wb, wsImput, "Imputaciones");
     XLSX.writeFile(wb, `informe_${desde}_a_${hasta}.xlsx`);
   };
   const enviarPorCorreo = () => {
     const cuerpo = encodeURIComponent(`Informe de fichajes e imputaciones (${desde} a ${hasta})\n\nFichajes: ${fichajes.length}\nImputaciones: ${imputaciones.length}\n\nExporta primero a Excel y adjúntalo manualmente.`);
     window.open(`mailto:?subject=${encodeURIComponent("Informe de fichajes e imputaciones")}&body=${cuerpo}`, "_blank");
   };
-  const totalHorasPorUsuario = useMemo(() => { const acc = {}; imputaciones.forEach((i) => { acc[i.userName] = (acc[i.userName] || 0) + i.hours; }); return acc; }, [imputaciones]);
+  const resumenPorUsuario = useMemo(() => {
+    const acc = {};
+    imputaciones.forEach((i) => {
+      if (!acc[i.userName]) acc[i.userName] = { normal: 0, excedente: 0 };
+      acc[i.userName][i.excedente ? "excedente" : "normal"] += i.hours;
+    });
+    return acc;
+  }, [imputaciones]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -1074,10 +1099,10 @@ function Informes({ api }) {
         </div>
       </div>
       <div className="card">
-        <h3 style={{ fontSize: 14, marginBottom: 10 }}>Horas imputadas por trabajador (periodo)</h3>
-        <div className="table-wrap"><table><thead><tr><th>Trabajador</th><th>Total horas</th></tr></thead><tbody>
-          {Object.entries(totalHorasPorUsuario).map(([name, h]) => <tr key={name}><td>{name}</td><td className="mono">{h}h</td></tr>)}
-          {Object.keys(totalHorasPorUsuario).length === 0 && <tr><td colSpan={2} style={{ textAlign: "center", color: "var(--muted)", padding: 16 }}>Sin datos en el periodo.</td></tr>}
+        <h3 style={{ fontSize: 14, marginBottom: 10 }}>Horas por trabajador (periodo)</h3>
+        <div className="table-wrap"><table><thead><tr><th>Trabajador</th><th>Normales</th><th>Excedentes</th><th>Total</th></tr></thead><tbody>
+          {Object.entries(resumenPorUsuario).map(([name, h]) => <tr key={name}><td>{name}</td><td className="mono">{h.normal}h</td><td className="mono" style={{ color: h.excedente > 0 ? "var(--accent-ink)" : undefined }}>{h.excedente}h</td><td className="mono" style={{ fontWeight: 700 }}>{Math.round((h.normal + h.excedente) * 100) / 100}h</td></tr>)}
+          {Object.keys(resumenPorUsuario).length === 0 && <tr><td colSpan={4} style={{ textAlign: "center", color: "var(--muted)", padding: 16 }}>Sin datos en el periodo.</td></tr>}
         </tbody></table></div>
       </div>
       <div className="card">
@@ -1157,9 +1182,12 @@ function GestionUsuarios({ api, refreshConfig, showToast }) {
 
 function GestionFamilia({ api, config, refreshConfig, showToast, familia }) {
   const esProyectos = familia === "proyectos";
-  const items = esProyectos ? (config?.projects || []) : (config?.auxTasks || []);
+  const itemsRaw = esProyectos ? (config?.projects || []) : (config?.auxTasks || []);
+  const items = [...itemsRaw].sort((a, b) => (a.fixed === b.fixed ? 0 : a.fixed ? 1 : -1));
   const basePath = esProyectos ? "/api/projects" : "/api/aux-tasks";
   const [nombre, setNombre] = useState("");
+  const [editandoId, setEditandoId] = useState(null);
+  const [nombreEdit, setNombreEdit] = useState("");
 
   const addItem = async () => {
     if (!nombre.trim()) return;
@@ -1167,12 +1195,18 @@ function GestionFamilia({ api, config, refreshConfig, showToast, familia }) {
     catch (e) { showToast(e.message); }
   };
   const delItem = async (id) => { try { await api("DELETE", `${basePath}/${id}`); refreshConfig(); } catch (e) { showToast(e.message); } };
+  const empezarEdicion = (it) => { setEditandoId(it.id); setNombreEdit(it.name); };
+  const guardarEdicion = async (id) => {
+    if (!nombreEdit.trim()) return;
+    try { await api("PATCH", `${basePath}/${id}`, { name: nombreEdit.trim() }); setEditandoId(null); refreshConfig(); showToast("Actualizado."); }
+    catch (e) { showToast(e.message); }
+  };
 
   return (
     <div className="card">
       <h3 style={{ fontSize: 14, marginBottom: 4 }}>{esProyectos ? "Proyectos — Oficina y Fábrica" : "Trabajos auxiliares — Solo Fábrica"}</h3>
       <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 0, marginBottom: 12 }}>
-        {esProyectos ? "Visible en la imputación de horas de oficina y fábrica." : "Visible solo en la imputación de horas de los trabajadores de fábrica."} Los que aparecen <em>en cursiva</em> son los habituales de siempre.
+        {esProyectos ? "Visible en la imputación de horas de oficina y fábrica." : "Visible solo en la imputación de horas de los trabajadores de fábrica."} Los que aparecen <em>en cursiva</em> son los habituales de siempre — puedes cambiarles el nombre, pero no borrarlos.
       </p>
       <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
         <input className="input" style={{ flex: 1, minWidth: 180 }} placeholder="Nombre del nuevo proyecto o trabajo" value={nombre} onChange={(e) => setNombre(e.target.value)} />
@@ -1181,11 +1215,66 @@ function GestionFamilia({ api, config, refreshConfig, showToast, familia }) {
       <div className="table-wrap"><table><thead><tr><th>Nombre</th><th></th></tr></thead><tbody>
         {items.map((it) => (
           <tr key={it.id}>
-            <td style={it.fixed ? estiloOpcionFija : undefined}>{it.name}</td>
-            <td><button className="btn btn-danger btn-sm" onClick={() => delItem(it.id)} disabled={it.fixed} title={it.fixed ? "Concepto habitual — no se puede eliminar" : ""}><Trash2 size={13} /></button></td>
+            {editandoId === it.id ? (
+              <td colSpan={2}>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input className="input" style={{ flex: 1 }} value={nombreEdit} onChange={(e) => setNombreEdit(e.target.value)} autoFocus />
+                  <button className="btn btn-primary btn-sm" onClick={() => guardarEdicion(it.id)}><Check size={13} /></button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setEditandoId(null)}><X size={13} /></button>
+                </div>
+              </td>
+            ) : (
+              <>
+                <td style={it.fixed ? estiloOpcionFija : undefined}>{it.name}</td>
+                <td style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                  <button className="btn btn-ghost btn-sm" onClick={() => empezarEdicion(it)} title="Editar nombre"><Settings size={13} /></button>
+                  <button className="btn btn-danger btn-sm" onClick={() => delItem(it.id)} disabled={it.fixed} title={it.fixed ? "Concepto habitual — no se puede eliminar" : ""}><Trash2 size={13} /></button>
+                </td>
+              </>
+            )}
           </tr>
         ))}
       </tbody></table></div>
+    </div>
+  );
+}
+
+function GestionFrases({ api, showToast }) {
+  const [frases, setFrases] = useState([]);
+  const [texto, setTexto] = useState("");
+
+  const cargar = useCallback(() => { api("GET", "/api/frases").then(setFrases).catch(() => {}); }, [api]);
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const dias = Math.floor(Date.now() / 86400000);
+  const idxActual = frases.length ? Math.floor(dias / 14) % frases.length : -1;
+
+  const addFrase = async () => {
+    if (!texto.trim()) return;
+    try { await api("POST", "/api/frases", { texto: texto.trim() }); setTexto(""); cargar(); showToast("Frase añadida."); }
+    catch (e) { showToast(e.message); }
+  };
+  const delFrase = async (id) => { try { await api("DELETE", "/api/frases/" + id); cargar(); } catch (e) { showToast(e.message); } };
+
+  return (
+    <div className="card">
+      <h3 style={{ fontSize: 14, marginBottom: 4 }}>Frase motivacional del login</h3>
+      <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 0, marginBottom: 12 }}>
+        Se muestra en la pantalla de usuario/contraseña, a todos los trabajadores. Si añades varias, se van turnando automáticamente cada 14 días — la marcada como "En uso ahora" es la que se ve hoy.
+      </p>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        <input className="input" style={{ flex: 1, minWidth: 220 }} placeholder="Escribe una frase motivacional…" value={texto} onChange={(e) => setTexto(e.target.value)} />
+        <button className="btn btn-primary" onClick={addFrase}><Plus size={14} /> Añadir</button>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {frases.map((f, i) => (
+          <div key={f.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, border: "1px solid var(--line)", borderRadius: 8, padding: "8px 10px", background: i === idxActual ? "#F2E7D5" : "#fff" }}>
+            <span style={{ fontSize: 13.5, fontStyle: "italic" }}>"{f.texto}"{i === idxActual && <span className="pill pill-admin" style={{ marginLeft: 8 }}>En uso ahora</span>}</span>
+            <button className="btn btn-danger btn-sm" onClick={() => delFrase(f.id)}><Trash2 size={13} /></button>
+          </div>
+        ))}
+        {frases.length === 0 && <div style={{ color: "var(--muted)", fontSize: 13 }}>Todavía no hay ninguna frase — añade la primera arriba.</div>}
+      </div>
     </div>
   );
 }
