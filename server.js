@@ -112,21 +112,26 @@ async function redisSet(key, value) {
 let writeQueue = Promise.resolve();
 
 async function loadData() {
+  let data;
   if (USING_REDIS) {
     const raw = await redisGet(REDIS_KEY);
-    if (raw) return migrate(JSON.parse(raw));
-    const seed = seedData();
-    await redisSet(REDIS_KEY, JSON.stringify(seed));
-    return seed;
+    if (raw) {
+      data = migrate(JSON.parse(raw));
+    } else {
+      data = seedData();
+      await redisSet(REDIS_KEY, JSON.stringify(data));
+    }
+  } else {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (!fs.existsSync(DATA_FILE)) {
+      data = seedData();
+      fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+    } else {
+      data = migrate(JSON.parse(fs.readFileSync(DATA_FILE, "utf8")));
+      fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+    }
   }
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  if (!fs.existsSync(DATA_FILE)) {
-    const seed = seedData();
-    fs.writeFileSync(DATA_FILE, JSON.stringify(seed, null, 2));
-    return seed;
-  }
-  const data = migrate(JSON.parse(fs.readFileSync(DATA_FILE, "utf8")));
-  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+  if (autoCerrarFichajesPendientes(data)) await saveData(data);
   return data;
 }
 
@@ -218,6 +223,54 @@ function madridParts(date = new Date()) {
 }
 
 const todayISO = () => madridParts().date;
+
+// Convierte una fecha+hora "de Madrid" (p. ej. 2026-08-04, 20:00:00) al
+// instante UTC real que representa, teniendo en cuenta el horario de
+// verano/invierno. Se usa para fechar correctamente los cierres automáticos.
+function utcForMadridTime(dateISO, timeHHMMSS) {
+  const candidato = new Date(`${dateISO}T${timeHHMMSS}Z`);
+  const obtenido = madridParts(candidato);
+  const deseadoMs = new Date(`${dateISO}T${timeHHMMSS}Z`).getTime();
+  const obtenidoMs = new Date(`${obtenido.date}T${obtenido.time}Z`).getTime();
+  return new Date(candidato.getTime() - (obtenidoMs - deseadoMs));
+}
+
+// Si un trabajador ficha la entrada y se olvida de fichar la salida, a
+// partir de las 20:00 (hora de Madrid) de ese mismo día le registramos una
+// salida automática, para que ese día no se quede "abierto" indefinidamente.
+// Se comprueba cada vez que se leen los datos (no depende de que el
+// servidor esté encendido justo a las 20:00 — si estuvo dormido, se aplica
+// en cuanto alguien vuelve a usar la app).
+const HORA_CIERRE_AUTOMATICO = "20:00:00";
+function autoCerrarFichajesPendientes(data) {
+  const hoy = madridParts();
+  let cambios = false;
+  const porClave = {};
+  data.fichajes.forEach((f) => {
+    const clave = f.userId + "|" + f.date;
+    (porClave[clave] = porClave[clave] || []).push(f);
+  });
+  Object.entries(porClave).forEach(([clave, registros]) => {
+    const [userId, date] = clave.split("|");
+    registros.sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
+    const ultimo = registros[registros.length - 1];
+    if (ultimo.type !== "entrada") return; // ya tiene salida ese día
+    const esPasado = date < hoy.date;
+    const esHoyTrasCierre = date === hoy.date && hoy.time >= HORA_CIERRE_AUTOMATICO;
+    if (!esPasado && !esHoyTrasCierre) return;
+    const usuario = data.users.find((u) => u.id === userId);
+    data.fichajes.push({
+      id: uid(), userId, userName: usuario ? usuario.name : ultimo.userName || "—",
+      type: "salida", date, time: HORA_CIERRE_AUTOMATICO,
+      timestamp: utcForMadridTime(date, HORA_CIERRE_AUTOMATICO).toISOString(),
+      lat: null, lng: null, accuracy: null,
+      locationLabel: "Sin ubicación · cierre automático a las 20:00",
+      automatico: true,
+    });
+    cambios = true;
+  });
+  return cambios;
+}
 
 // Límite de horas de la jornada principal: L-J 8.5h, V 5h, fin de semana 0h
 function dailyCap(dateISO) {
@@ -512,3 +565,10 @@ server.listen(PORT, () => {
     console.log("Almacenamiento: archivo local (data/data.json) — Upstash NO detectado. Revisa las variables de entorno UPSTASH_REDIS_REST_URL y UPSTASH_REDIS_REST_TOKEN si esto es producción.");
   }
 });
+
+// Mientras el servidor esté despierto, revisa cada 5 minutos si hay fichajes
+// de entrada sin salida que ya deban cerrarse automáticamente (a partir de
+// las 20:00 de Madrid). Si el servidor estuvo dormido a esa hora exacta, la
+// comprobación dentro de loadData() lo aplica igualmente en cuanto alguien
+// vuelve a usar la app — esto solo lo adelanta mientras hay actividad.
+setInterval(() => { loadData().catch((e) => console.error("Error en comprobación periódica:", e.message)); }, 5 * 60 * 1000);
