@@ -381,8 +381,6 @@ async function handleApi(req, res, pathname, query) {
     const data = await loadData();
     if (!puedeProyectos(data)) return sendJSON(res, 403, { error: "No autorizado" });
     const id = pathname.split("/").pop();
-    const target = data.projects.find((p) => p.id === id);
-    if (target && target.fixed) return sendJSON(res, 400, { error: "Este proyecto es fijo — desmárcalo antes de borrarlo" });
     const updated = await persist((d) => { d.projects = d.projects.filter((p) => p.id !== id); return d; });
     return sendJSON(res, 200, updated.projects);
   }
@@ -410,8 +408,6 @@ async function handleApi(req, res, pathname, query) {
     const data = await loadData();
     if (!puedeAuxiliar(data)) return sendJSON(res, 403, { error: "No autorizado" });
     const id = pathname.split("/").pop();
-    const target = data.auxTasks.find((t) => t.id === id);
-    if (target && target.fixed) return sendJSON(res, 400, { error: "Este trabajo es fijo — desmárcalo antes de borrarlo" });
     const updated = await persist((d) => { d.auxTasks = d.auxTasks.filter((t) => t.id !== id); return d; });
     return sendJSON(res, 200, updated.auxTasks);
   }
