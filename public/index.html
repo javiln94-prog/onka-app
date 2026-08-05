@@ -1,1313 +1,611 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
-<title>onka — Fabricación de mobiliario</title>
-<script>
-  // Red de seguridad: si ocurre CUALQUIER error de JavaScript no controlado
-  // (incluidos fallos del propio traductor de código, antes de que React
-  // llegue a arrancar), lo mostramos en pantalla en vez de dejarla en blanco.
-  // Esto es clave para poder diagnosticar fallos en el móvil, donde no hay
-  // consola de errores a mano.
-  (function () {
-    var mostrado = false;
-    function mostrarError(mensaje, detalle) {
-      if (mostrado) return;
-      mostrado = true;
-      var root = document.getElementById("root");
-      if (!root) { document.addEventListener("DOMContentLoaded", function () { mostrarError(mensaje, detalle); }); return; }
-      root.innerHTML =
-        '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;font-family:sans-serif;background:#F6F4EF;">' +
-        '<div style="max-width:480px;text-align:center;">' +
-        '<div style="font-size:40px;margin-bottom:12px;">\u26A0\uFE0F</div>' +
-        "<h2 style=\"margin-bottom:8px;\">Ha fallado algo al cargar la app</h2>" +
-        '<p style="color:#726E64;font-size:14px;margin-bottom:10px;">' + mensaje + '</p>' +
-        (detalle ? '<pre style="text-align:left;background:#fff;border:1px solid #E4E1D8;border-radius:8px;padding:10px;font-size:11px;overflow:auto;max-height:160px;color:#B3433A;">' + detalle.replace(/</g, "&lt;") + '</pre>' : "") +
-        '<button onclick="window.location.reload()" style="margin-top:14px;padding:10px 18px;border-radius:9px;border:none;background:#0A0A0A;color:#fff;font-weight:600;cursor:pointer;">Reintentar</button>' +
-        "</div></div>";
-    }
-    window.addEventListener("error", function (e) {
-      mostrarError("Error de JavaScript. Envía esta captura para que lo revisen:", (e.message || "") + "\n" + (e.filename || "") + ":" + (e.lineno || "") + ":" + (e.colno || ""));
-    });
-    window.addEventListener("unhandledrejection", function (e) {
-      mostrarError("Error al comunicarse con el servidor. Envía esta captura para que lo revisen:", String((e.reason && (e.reason.stack || e.reason.message)) || e.reason || ""));
-    });
-    window.__mostrarErrorCarga = mostrarError;
-  })();
-</script>
-<link rel="manifest" href="/manifest.json" />
-<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-<meta name="apple-mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-status-bar-style" content="black" />
-<meta name="apple-mobile-web-app-title" content="onka" />
-<meta name="theme-color" content="#0A0A0A" />
-<link rel="icon" href="/icons/icon-192.png" />
-<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.7/babel.min.js"></script>
-<script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script>
-  // Si por lo que sea (red lenta, bloqueador de contenido, etc.) alguna de las
-  // librerías de arriba no llega a cargar, sin esto la pantalla se queda en
-  // blanco sin ninguna pista. Con esto, mostramos un aviso claro en su lugar.
-  window.addEventListener("load", function () {
-    setTimeout(function () {
-      var faltan = [];
-      if (typeof React === "undefined") faltan.push("React");
-      if (typeof ReactDOM === "undefined") faltan.push("ReactDOM");
-      if (typeof Babel === "undefined") faltan.push("Babel");
-      if (faltan.length) {
-        var root = document.getElementById("root");
-        if (root && !root.hasChildNodes()) {
-          root.innerHTML =
-            '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;font-family:sans-serif;background:#F6F4EF;">' +
-            '<div style="max-width:440px;text-align:center;">' +
-            '<div style="font-size:40px;margin-bottom:12px;">📡</div>' +
-            "<h2 style=\"margin-bottom:8px;\">No se pudo cargar la aplicación</h2>" +
-            '<p style="color:#726E64;font-size:14px;margin-bottom:16px;">No se pudieron descargar algunos componentes necesarios (' + faltan.join(", ") + '). Suele deberse a una conexión inestable o a un bloqueador de contenido activo en el navegador. Comprueba tu conexión a internet y vuelve a intentarlo.</p>' +
-            '<button onclick="window.location.reload()" style="padding:10px 18px;border-radius:9px;border:none;background:#0A0A0A;color:#fff;font-weight:600;cursor:pointer;">Reintentar</button>' +
-            "</div></div>";
-        }
-      }
-    }, 4000);
+/**
+ * ONKA — Control horario e imputación de horas
+ * Backend en Node.js puro (sin dependencias que instalar).
+ *
+ * Almacenamiento de datos, con dos modos:
+ *  - Si están definidas las variables de entorno UPSTASH_REDIS_REST_URL y
+ *    UPSTASH_REDIS_REST_TOKEN, los datos se guardan en Upstash (Redis
+ *    gratuito y persistente en internet) — así sobreviven a los reinicios
+ *    del servicio, incluso en el plan gratuito de Render.
+ *  - Si no están definidas, se guardan en data/data.json en el propio
+ *    disco (válido para probar en tu ordenador, pero se borra si el
+ *    servidor se reinicia en un hosting sin disco persistente).
+ *
+ * Arrancar:  node server.js
+ * Puerto:    variable de entorno PORT, o 3000 si no está definida.
+ */
+
+const http = require("http");
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
+const { URL } = require("url");
+
+const DATA_DIR = path.join(__dirname, "data");
+const DATA_FILE = path.join(DATA_DIR, "data.json");
+const PUBLIC_DIR = path.join(__dirname, "public");
+const PORT = process.env.PORT || 3000;
+
+const REDIS_URL = (process.env.UPSTASH_REDIS_REST_URL || "").trim().replace(/\/+$/, "");
+const REDIS_TOKEN = (process.env.UPSTASH_REDIS_REST_TOKEN || "").trim();
+const USING_REDIS = !!(REDIS_URL && REDIS_TOKEN);
+const REDIS_KEY = "onka-data";
+
+function uid() {
+  return crypto.randomBytes(6).toString("hex");
+}
+
+// -----------------------------------------------------------------
+// Datos iniciales (solo se usan la primera vez, si no hay datos guardados)
+// -----------------------------------------------------------------
+function seedData() {
+  return {
+    users: [{ id: "u_admin", name: "Javi López", role: "admin", pin: "0000" }],
+    projects: [
+      { id: uid(), name: "Mantenimiento maquinaria", fixed: true },
+      { id: uid(), name: "Captación de clientes", fixed: true },
+      { id: uid(), name: "Reunión proveedores", fixed: true },
+      { id: uid(), name: "Administración", fixed: true },
+      { id: uid(), name: "Baja médica", fixed: true },
+      { id: uid(), name: "Asuntos propios", fixed: true },
+    ],
+    auxTasks: [
+      { id: uid(), name: "Preparación pedidos PLV", fixed: true },
+      { id: uid(), name: "Mantenimiento maquinaria", fixed: true },
+      { id: uid(), name: "Carga descarga no pedidos", fixed: true },
+    ],
+    fichajes: [],
+    imputaciones: [],
+    events: [],
+    responsablesProyecto: [], // ids de usuarios autorizados a gestionar la familia "proyectos"
+    responsablesAuxiliar: [], // ids de usuarios autorizados a gestionar la familia "auxiliares"
+    frases: [], // frases motivacionales del administrador, visibles en el login
+    sessions: {},
+  };
+}
+
+// Migración suave: asegura que los datos cargados (de Redis o del archivo)
+// tienen todos los campos de versiones nuevas de la app, sin borrar nada.
+function migrate(data) {
+  if (!data.responsablesAuxiliar) data.responsablesAuxiliar = [];
+  if (!data.responsablesProyecto) data.responsablesProyecto = [];
+  data.events = (data.events || []).map((e) => ({
+    time: null, description: "", location: "", invitados: "todos",
+    alerta: { activa: false, minutosAntes: 60 }, festivoScope: "nacional", festivoLugar: "",
+    ...e,
+  }));
+  ["Baja médica", "Asuntos propios", "Mantenimiento maquinaria", "Captación de clientes", "Reunión proveedores", "Administración"].forEach((nombre) => {
+    if (!data.projects.some((p) => p.name === nombre)) data.projects.push({ id: uid(), name: nombre, fixed: true });
   });
-</script>
-<style>html,body{margin:0;padding:0;background:#F6F4EF;} #root{min-height:100vh;}</style>
-</head>
-<body>
-<div id="root"></div>
-<script type="text/babel" data-presets="react">
-const { useState, useEffect, useCallback, useMemo, useRef } = React;
-
-/* =================================================================
-   CSS — Identidad ONKA
-================================================================= */
-const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
-:root{
-  --paper:#F6F4EF; --ink:#0E0E0E; --panel:#FFFFFF; --line:#E4E1D8;
-  --primary:#0A0A0A; --primary-dark:#000000; --accent:#A9762E; --accent-ink:#3A2707;
-  --ok:#2F7D5C; --warn:#C1440E; --muted:#726E64;
-  --office:#3B6FA0; --fabrica:#8A5A2B;
+  data.auxTasks = data.auxTasks || [];
+  data.frases = data.frases || [];
+  ["Preparación pedidos PLV", "Mantenimiento maquinaria", "Carga descarga no pedidos"].forEach((nombre) => {
+    if (!data.auxTasks.some((t) => t.name === nombre)) data.auxTasks.push({ id: uid(), name: nombre, fixed: true });
+  });
+  const admin = data.users.find((u) => u.id === "u_admin");
+  if (admin && admin.name === "Administrador") admin.name = "Javi López";
+  return data;
 }
-*{box-sizing:border-box;}
-.app{font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;background:var(--paper);color:var(--ink);min-height:100%;}
-.mono{font-family:ui-monospace,SFMono-Regular,"Roboto Mono",monospace;}
-.display{font-family:"Space Grotesk","Segoe UI",sans-serif;}
-h1,h2,h3{font-family:"Space Grotesk","Segoe UI",sans-serif; margin:0; letter-spacing:-0.01em;}
-.btn{border:none;border-radius:9px;padding:10px 16px;font-weight:600;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;gap:8px;transition:transform .08s ease, box-shadow .15s ease;font-family:"Inter",sans-serif;}
-.btn:active{transform:scale(0.97);}
-.btn:disabled{opacity:.5;cursor:not-allowed;}
-.btn-primary{background:var(--primary);color:#fff;}
-.btn-primary:hover{background:var(--primary-dark);}
-.btn-accent{background:var(--accent);color:#fff;}
-.btn-accent:hover{filter:brightness(1.06);}
-.btn-ghost{background:transparent;color:var(--ink);border:1px solid var(--line);}
-.btn-ghost:hover{background:#EDEAE1;}
-.btn-danger{background:#fff;color:var(--warn);border:1px solid #ECC;}
-.btn-danger:hover{background:#FCEEE8;}
-.btn-sm{padding:6px 10px;font-size:12.5px;border-radius:7px;}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;}
-.input, select.input, textarea.input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:9px;font-size:16px;background:#fff;color:var(--ink);font-family:inherit;}
-textarea.input{resize:vertical;min-height:70px;}
-.input:focus, select.input:focus, textarea.input:focus{outline:2px solid var(--ink);outline-offset:1px;}
-.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
-.pill-office{background:#E8F0F8;color:var(--office);}
-.pill-fabrica{background:#F3EADD;color:var(--fabrica);}
-.pill-admin{background:#F2E7D5;color:var(--accent-ink);}
-.tab{padding:10px 16px;border-radius:9px;font-weight:600;font-size:13.5px;cursor:pointer;display:flex;align-items:center;gap:8px;color:#C9C6BE;}
-.tab.active{background:rgba(255,255,255,0.12);color:#fff;}
-table{width:100%;border-collapse:collapse;font-size:13.5px;}
-th{text-align:left;padding:8px 10px;color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--line);white-space:nowrap;}
-td{padding:9px 10px;border-bottom:1px solid var(--line);}
-::placeholder{color:#9AA0A6;}
-.scrollbar::-webkit-scrollbar{height:6px;width:6px;}
-.scrollbar::-webkit-scrollbar-thumb{background:#D8D4C9;border-radius:6px;}
-.table-wrap{overflow-x:auto;}
-.layout-2col{display:grid;grid-template-columns:minmax(260px,340px) 1fr;gap:20px;}
-.layout-cal{display:grid;grid-template-columns:1fr 300px;gap:20px;}
-.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:10px;font-size:13px;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,.25);}
-.cal-cell{height:80px;border-radius:8px;padding:4px;display:flex;flex-direction:column;gap:2px;overflow:hidden;cursor:pointer;}
-.cal-tag{font-size:9px;border-radius:5px;padding:1px 4px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.checkrow{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px;}
-@media (max-width: 780px){
-  .layout-2col, .layout-cal{grid-template-columns:1fr;}
-  .card{padding:16px;border-radius:12px;}
-  .cal-cell{height:64px;}
+
+// -----------------------------------------------------------------
+// Upstash Redis (REST API — sin librerías, solo fetch nativo de Node)
+// -----------------------------------------------------------------
+async function redisGet(key) {
+  const r = await fetch(`${REDIS_URL}/get/${encodeURIComponent(key)}`, { headers: { Authorization: `Bearer ${REDIS_TOKEN}` } });
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error(`Upstash respondió ${r.status} al leer: ${body || "(sin detalle)"}`);
+  }
+  const j = await r.json();
+  return j.result; // string guardado, o null si no existe
 }
-`;
+async function redisSet(key, value) {
+  const r = await fetch(`${REDIS_URL}/set/${encodeURIComponent(key)}`, { method: "POST", headers: { Authorization: `Bearer ${REDIS_TOKEN}` }, body: value });
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error(`Upstash respondió ${r.status} al guardar: ${body || "(sin detalle)"}`);
+  }
+}
 
-const ONKA_LOGO_PLACEHOLDER = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAB9kAAAOyCAYAAADXXmXxAAAACXBIWXMAAC4jAAAuIwF4pT92AAAgAElEQVR4nOzdX5CcZZ3o8Z+Wdw0WVwNn3bLOvDkruAc7rkssSKLiNFQmloDSPeDxbNVa00PJzUqY6MXZVIbqsdZaWPKHPSXlbnqoRHb3lJlBwAtnqGTCupsQStDDNKjA1gynKNFDrvzDXHMuPJ1NsoBPmHfm7bf787mLlplflTDd7/N9n+d5T0RcHxFPBgAAAAAAAADwjt5b9AAAAAAAAAAAUBYiOwAAAAAAAAAkEtkBAAAAAAAAIJHIDgAAAAAAAACJRHYAAAAAAAAASCSyAwAAAAAAAEAikR0AAAAAAAAAEonsAAAAAAAAAJBIZAcAAAAAAACARCI7AAAAAAAAACQS2QEAAAAAAAAgkcgOAAAAAAAAAIlEdgAAAAAAAABIJLIDAAAAAAAAQCKRHQAAAAAAAAASiewAAAAAAAAAkEhkBwAAAAAAAIBEIjsAAAAAAAAAJBLZAQAAAAAAACCRyA4AAAAAAAAAiUR2AAAAAAAAAEgksgMAAAAAAABAIpEdAAAAAAAAABKJ7AAAAAAAAACQSGQHAAAAAAAAgEQiOwAAAAAAAAAkEtkBAAAAAAAAIJHIDgAAAAAAAACJRHYAAAAAAAAASCSyAwAAAAAAAEAikR0AAAAAAAAAEonsAAAAAAAAAJBIZAcAAAAAAACARCI7AAAAAAAAACQS2QEAAAAAAAAgkcgOAAAAAAAAAIlEdgAAAAAAAABIJLIDAAAAAAAAQCKRHQAAAAAAAAASiewAAAAAAAAAkEhkBwAAAAAAAIBEIjsAAAAAAAAAJBLZAQAAAAAAACCRyA4AAAAAAAAAiUR2AAAAAAAAAEgksgMAAAAAAABAIpEdAAAAAAAAABKJ7AAAAAAAAACQSGQHAAAAAAAAgEQiOwAAAAAAAAAkEtkBAAAAAAAAIJHIDgAAAAAAAACJRHYAAAAAAAAASCSyAwAAAAAAAEAikR0AAAAAAAAAEonsAAAAAAAAAJBIZAcAAAAAAACARCI7AAAAAAAAACQS2QEAAAAAAAAgkcgOAAAAAAAAAIlEdgAAAAAAAABIJLIDAAAAAAAAQCKRHQAAAAAAAAASiewAAAAAAAAAkEhkBwAAAAAAAIBEIjsAAAAAAAAAJBLZAQAAAAAAACCRyA4AAAAAAAAAiUR2AAAAAAAAAEgksgMAAAAAAABAIpEdAAAAAAAAABKJ7AAAAAAAAACQSGQHAAAAAAAAgEQiOwAAAAAAAAAkEtkBAAAAAAAAIJHIDgAAAAAAAACJRHYAAAAAAAAASCSyAwAAAAAAAEAikR0AAAAAAAAAEonsAAAAAAAAAJBIZAcAAAAAAACARCI7AAAAAAAAACQS2QEAAAAAAAAgkcgOAAAAAAAAAIlEdgAAAAAAAABIJLIDAAAAAAAAQCKRHQAAAAAAAAASiewAAAAAAAAAkEhkBwAAAAAAAIBEIjsAAAAAAAAAJBLZAQAAAAAAACCRyA4AAAAAAAAAiUR2AAAAAAAAAEgksgMAAAAAAABAIpEdAAAAAAAAABKJ7AAAAAAAAACQSGQHAAAAAAAAgEQiOwAAAAAAAAAkEtkBAAAAAAAAIJHIDgAAAAAAAACJRHYAAAAAAAAASCSyAwAAAAAAAEAikR0AAAAAAAAAEonsAAAAAAAAAJBIZAcAAAAAAACARCI7AAAAAAAAACQS2QEAAAAAAAAgkcgOAAAAAAAAAIlEdgAAAAAAAABIJLIDAAAAAAAAQCKRHQAAAAAAAAASiewAAAAAAAAAkEhkBwAAAAAAAIBEIjsAAAAAAAAAJBLZAQAAAAAAACCRyA4AAAAAAAAAiUR2AAAAAAAAAEgksgMAAAAAAABAIpEdAAAAAAAAABKJ7AAAAAAAAACQSGQHAAAAAAAAgEQiOwAAAAAAAAAkEtkBAAAAAAAAIJHIDgAAAAAAAACJRHYAAAAAAAAASCSyAwAAAAAAAEAikR0AAAAAAAAAEonsAAAAAAAAAJBIZAcAAAAAAACARCI7AAAAAAAAACQS2QEAAAAAAAAgkcgOAAAAAAAAAIlEdgAAAAAAAABIJLIDAAAAAAAAQCKRHQAAAAAAAAASiewAAAAAAAAAkEhkBwAAAAAAAIBEIjsAAAAAAAAAJBLZAQAAAAAAACCRyA4AAAAAAAAAiUR2AAAAAAAAAEgksgMAAAAAAABAIpEdAAAAAAAAABKJ7AAAAAAAAACQSGQHAAAAAAAAgEQiOwAAAAAAAAAkEtkBAAAAAAAAIJHIDgAAAAAAAACJRHYAAAAAAAAASCSyAwAAAAAAAEAikR0AAAAAAAAAEonsAAAAAAAAAJBIZAcAAAAAAACARCI7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AACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgEhkBwAAAAAAAIBIZAcAAAAAAACASGQHAAAAAAAAgGjtvU9vAAAAAAAAAIBf+ABS22hgpA6s4AAAAABJRU5ErkJggg==";
+// -----------------------------------------------------------------
+// Almacenamiento — SIEMPRE lee el dato más reciente en cada petición (nada
+// de caché entre peticiones), para evitar que quede una copia obsoleta en
+// memoria si el proceso se reinicia o hay más de una instancia sirviendo
+// peticiones a la vez.
+// -----------------------------------------------------------------
+let writeQueue = Promise.resolve();
 
-/* =================================================================
-   Helpers de fecha y jornada
-================================================================= */
-const pad = (n) => String(n).padStart(2, "0");
-const toISODate = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-const todayISO = () => toISODate(new Date());
-const fmtTime = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-const isWeekend = (isoDate) => { const d = new Date(isoDate + "T00:00:00"); const day = d.getDay(); return day === 0 || day === 6; };
-const DIAS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
-const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+async function loadData() {
+  let data;
+  if (USING_REDIS) {
+    const raw = await redisGet(REDIS_KEY);
+    if (raw) {
+      data = migrate(JSON.parse(raw));
+    } else {
+      data = seedData();
+      await redisSet(REDIS_KEY, JSON.stringify(data));
+    }
+  } else {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (!fs.existsSync(DATA_FILE)) {
+      data = seedData();
+      fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+    } else {
+      data = migrate(JSON.parse(fs.readFileSync(DATA_FILE, "utf8")));
+      fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+    }
+  }
+  if (autoCerrarFichajesPendientes(data)) await saveData(data);
+  return data;
+}
 
-function dailyCap(isoDate) {
-  const d = new Date(isoDate + "T00:00:00");
-  const day = d.getDay();
+async function saveData(data) {
+  if (USING_REDIS) {
+    await redisSet(REDIS_KEY, JSON.stringify(data));
+  } else {
+    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+  }
+}
+
+function persist(mutator) {
+  writeQueue = writeQueue.then(async () => {
+    const data = await loadData();
+    const result = mutator(data) || data;
+    await saveData(result);
+    return result;
+  });
+  return writeQueue;
+}
+
+// -----------------------------------------------------------------
+// Sesiones
+// -----------------------------------------------------------------
+const TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+function createSession(user) {
+  const token = crypto.randomBytes(24).toString("hex");
+  const session = { userId: user.id, role: user.role, expiresAt: Date.now() + TOKEN_TTL_MS };
+  return persist((data) => {
+    data.sessions[token] = session;
+    return data;
+  }).then(() => token);
+}
+async function getSession(token) {
+  const data = await loadData();
+  const s = data.sessions[token];
+  if (!s) return null;
+  if (s.expiresAt < Date.now()) return null;
+  return s;
+}
+
+// -----------------------------------------------------------------
+// Utilidades HTTP
+// -----------------------------------------------------------------
+function sendJSON(res, status, obj) {
+  const body = JSON.stringify(obj);
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+  });
+  res.end(body);
+}
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let chunks = "";
+    req.on("data", (c) => (chunks += c));
+    req.on("end", () => { if (!chunks) return resolve({}); try { resolve(JSON.parse(chunks)); } catch (e) { reject(e); } });
+    req.on("error", reject);
+  });
+}
+async function auth(req) {
+  const header = req.headers["authorization"] || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+  if (!token) return null;
+  const session = await getSession(token);
+  if (!session) return null;
+  return { token, ...session };
+}
+function isAdmin(session) { return !!session && session.role === "admin"; }
+function puedeGestionarEventos(data, session) {
+  return isAdmin(session) || data.responsablesProyecto.includes(session.userId) || data.responsablesAuxiliar.includes(session.userId);
+}
+
+// El servidor puede estar corriendo en UTC (p. ej. en Render). Calculamos
+// siempre la fecha/hora en el huso horario de España, con cambio de hora
+// de verano/invierno automático, para que el fichaje registre la hora real.
+function madridParts(date = new Date()) {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Madrid",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  });
+  const parts = fmt.formatToParts(date);
+  const get = (type) => parts.find((p) => p.type === type).value;
+  return { date: `${get("year")}-${get("month")}-${get("day")}`, time: `${get("hour")}:${get("minute")}:${get("second")}` };
+}
+
+const todayISO = () => madridParts().date;
+
+// Convierte una fecha+hora "de Madrid" (p. ej. 2026-08-04, 20:00:00) al
+// instante UTC real que representa, teniendo en cuenta el horario de
+// verano/invierno. Se usa para fechar correctamente los cierres automáticos.
+function utcForMadridTime(dateISO, timeHHMMSS) {
+  const candidato = new Date(`${dateISO}T${timeHHMMSS}Z`);
+  const obtenido = madridParts(candidato);
+  const deseadoMs = new Date(`${dateISO}T${timeHHMMSS}Z`).getTime();
+  const obtenidoMs = new Date(`${obtenido.date}T${obtenido.time}Z`).getTime();
+  return new Date(candidato.getTime() - (obtenidoMs - deseadoMs));
+}
+
+// Si un trabajador ficha la entrada y se olvida de fichar la salida, a
+// partir de las 20:00 (hora de Madrid) de ese mismo día le registramos una
+// salida automática, para que ese día no se quede "abierto" indefinidamente.
+// Se comprueba cada vez que se leen los datos (no depende de que el
+// servidor esté encendido justo a las 20:00 — si estuvo dormido, se aplica
+// en cuanto alguien vuelve a usar la app).
+const HORA_CIERRE_AUTOMATICO = "20:00:00";
+function autoCerrarFichajesPendientes(data) {
+  const hoy = madridParts();
+  let cambios = false;
+  const porClave = {};
+  data.fichajes.forEach((f) => {
+    const clave = f.userId + "|" + f.date;
+    (porClave[clave] = porClave[clave] || []).push(f);
+  });
+  Object.entries(porClave).forEach(([clave, registros]) => {
+    const [userId, date] = clave.split("|");
+    registros.sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
+    const ultimo = registros[registros.length - 1];
+    if (ultimo.type !== "entrada") return; // ya tiene salida ese día
+    const esPasado = date < hoy.date;
+    const esHoyTrasCierre = date === hoy.date && hoy.time >= HORA_CIERRE_AUTOMATICO;
+    if (!esPasado && !esHoyTrasCierre) return;
+    const usuario = data.users.find((u) => u.id === userId);
+    data.fichajes.push({
+      id: uid(), userId, userName: usuario ? usuario.name : ultimo.userName || "—",
+      type: "salida", date, time: HORA_CIERRE_AUTOMATICO,
+      timestamp: utcForMadridTime(date, HORA_CIERRE_AUTOMATICO).toISOString(),
+      lat: null, lng: null, accuracy: null,
+      locationLabel: "Sin ubicación · cierre automático a las 20:00",
+      automatico: true,
+    });
+    cambios = true;
+  });
+  return cambios;
+}
+
+// Límite de horas de la jornada principal: L-J 8.5h, V 5h, fin de semana 0h
+function dailyCap(dateISO) {
+  const d = new Date(dateISO + "T00:00:00");
+  const day = d.getDay(); // 0 domingo ... 6 sábado
   if (day >= 1 && day <= 4) return 8.5;
   if (day === 5) return 5;
   return 0;
 }
 
-const OPCIONES_AVISO = [
-  { value: 15, label: "15 minutos antes" },
-  { value: 30, label: "30 minutos antes" },
-  { value: 60, label: "1 hora antes" },
-  { value: 180, label: "3 horas antes" },
-  { value: 1440, label: "1 día antes" },
-];
-
-/* =================================================================
-   Cliente API
-================================================================= */
-function useApi(token, onUnauthorized) {
-  return useCallback(async (method, path, body) => {
-    const opts = { method, headers: {} };
-    if (token) opts.headers["Authorization"] = "Bearer " + token;
-    if (body !== undefined) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
-    const r = await fetch(path, opts);
-    if (r.status === 401) { onUnauthorized && onUnauthorized(); throw new Error("No autenticado"); }
-    let data = null;
-    try { data = await r.json(); } catch (e) {}
-    if (!r.ok) throw new Error((data && data.error) || "Error de red");
-    return data;
-  }, [token, onUnauthorized]);
-}
-
-function getPosition() {
-  return new Promise((resolve) => {
-    if (!navigator.geolocation) return resolve(null);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
-      () => resolve(null),
-      { enableHighAccuracy: true, timeout: 8000 }
-    );
+// -----------------------------------------------------------------
+// Estáticos
+// -----------------------------------------------------------------
+const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".png": "image/png", ".svg": "image/svg+xml", ".ico": "image/x-icon" };
+function serveStatic(req, res, pathname) {
+  let filePath = pathname === "/" ? "/index.html" : pathname;
+  filePath = path.join(PUBLIC_DIR, filePath);
+  if (!filePath.startsWith(PUBLIC_DIR)) { res.writeHead(403); return res.end("Prohibido"); }
+  fs.readFile(filePath, (err, content) => {
+    if (err) {
+      fs.readFile(path.join(PUBLIC_DIR, "index.html"), (err2, indexContent) => {
+        if (err2) { res.writeHead(404); return res.end("No encontrado"); }
+        res.writeHead(200, { "Content-Type": MIME[".html"] });
+        res.end(indexContent);
+      });
+      return;
+    }
+    const ext = path.extname(filePath);
+    res.writeHead(200, { "Content-Type": MIME[ext] || "application/octet-stream" });
+    res.end(content);
   });
 }
-async function reverseGeocode(lat, lng) {
-  try {
-    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=16`, { headers: { Accept: "application/json" } });
-    if (!r.ok) return null;
-    const j = await r.json();
-    return j.display_name || null;
-  } catch (e) { return null; }
-}
 
-/* =================================================================
-   APP
-================================================================= */
-/* =================================================================
-   Capturador de errores — evita pantallas en blanco: si algo falla
-   de forma inesperada, muestra el motivo en vez de romper toda la app.
-================================================================= */
-class ErrorBoundary extends React.Component {
-  constructor(props) { super(props); this.state = { error: null }; }
-  static getDerivedStateFromError(error) { return { error }; }
-  componentDidCatch(error, info) { console.error("Error de la app:", error, info); }
-  render() {
-    if (this.state.error) {
-      return (
-        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, background: "var(--paper, #F6F4EF)", fontFamily: "sans-serif" }}>
-          <div style={{ maxWidth: 480, textAlign: "center" }}>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>⚠️</div>
-            <h2 style={{ marginBottom: 8 }}>Algo ha fallado</h2>
-            <p style={{ color: "#726E64", fontSize: 14, marginBottom: 16 }}>{String(this.state.error.message || this.state.error)}</p>
-            <button onClick={() => window.location.reload()} style={{ padding: "10px 18px", borderRadius: 9, border: "none", background: "#0A0A0A", color: "#fff", fontWeight: 600, cursor: "pointer" }}>Recargar la página</button>
-          </div>
-        </div>
-      );
-    }
-    return this.props.children;
+// -----------------------------------------------------------------
+// API
+// -----------------------------------------------------------------
+async function handleApi(req, res, pathname, query) {
+  if (req.method === "OPTIONS") return sendJSON(res, 204, {});
+
+  if (pathname === "/api/public-users" && req.method === "GET") {
+    const data = await loadData();
+    return sendJSON(res, 200, data.users.map((u) => ({ id: u.id, name: u.name, role: u.role })));
   }
-}
 
-// Envoltorio seguro sobre localStorage: en Safari (sobre todo en Navegación
-// Privada) puede lanzar excepciones al leer/escribir. Con esto, la app sigue
-// funcionando en esa sesión aunque no pueda recordar el inicio de sesión.
-const storage = {
-  get(key) { try { return localStorage.getItem(key); } catch (e) { return null; } },
-  set(key, value) { try { localStorage.setItem(key, value); } catch (e) {} },
-  remove(key) { try { localStorage.removeItem(key); } catch (e) {} },
-};
-
-function App() {
-  const [token, setToken] = useState(() => storage.get("onka_token") || null);
-  const [user, setUser] = useState(() => { try { return JSON.parse(storage.get("onka_user")); } catch (e) { return null; } });
-  const [tab, setTab] = useState("fichaje");
-  const [config, setConfig] = useState(null);
-  const [events, setEvents] = useState([]);
-  const [toast, setToast] = useState(null);
-
-  const showToast = useCallback((msg) => { setToast(msg); setTimeout(() => setToast(null), 4200); }, []);
-
-  const logout = useCallback((mensaje) => {
-    setToken(null); setUser(null); setConfig(null); setEvents([]);
-    storage.remove("onka_token"); storage.remove("onka_user");
-    if (mensaje) showToast(mensaje);
-  }, [showToast]);
-
-  const onUnauthorized = useCallback(() => {
-    logout("Tu sesión ya no es válida en el servidor (puede haberse reiniciado). Vuelve a entrar con tu PIN.");
-  }, [logout]);
-
-  const api = useApi(token, onUnauthorized);
-  const refreshConfig = useCallback(() => { if (token) api("GET", "/api/config").then(setConfig).catch(() => {}); }, [api, token]);
-  const refreshEvents = useCallback(() => { if (token) api("GET", "/api/events").then(setEvents).catch(() => {}); }, [api, token]);
-
-  useEffect(() => { if (token) { refreshConfig(); refreshEvents(); } }, [token]); // eslint-disable-line
-
-  const onLogin = (u, t) => { setUser(u); setToken(t); setTab("fichaje"); storage.set("onka_token", t); storage.set("onka_user", JSON.stringify(u)); };
-  const onLogout = () => { api("POST", "/api/logout").catch(() => {}); logout(); };
-
-  return (
-    <div className="app" style={{ minHeight: "100vh" }}>
-      <style>{CSS}</style>
-      {!token || !user ? (
-        <Login onLogin={onLogin} />
-      ) : (
-        <Shell user={user} api={api} tab={tab} setTab={setTab} onLogout={onLogout} config={config} refreshConfig={refreshConfig} events={events} refreshEvents={refreshEvents} showToast={showToast} />
-      )}
-      {toast && <div className="toast">{toast}</div>}
-    </div>
-  );
-}
-
-/* =================================================================
-   LOGIN
-================================================================= */
-function Login({ onLogin }) {
-  const [users, setUsers] = useState([]);
-  const [selected, setSelected] = useState("");
-  const [pin, setPin] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [frase, setFrase] = useState(null);
-
-  useEffect(() => {
-    fetch("/api/public-users")
-      .then(async (r) => {
-        const data = await r.json().catch(() => null);
-        if (!r.ok || !Array.isArray(data)) {
-          throw new Error((data && data.error) || `El servidor respondió con un error (${r.status}). Avisa al administrador.`);
-        }
-        return data;
-      })
-      .then((list) => { setUsers(list); if (list.length) setSelected(list[0].id); })
-      .catch((e) => setError(e.message || "No se pudo conectar con el servidor."));
-    fetch("/api/frase-actual").then((r) => r.json()).then((d) => setFrase(d.texto || null)).catch(() => {});
-  }, []);
-
-  const submit = async (e) => {
-    e.preventDefault();
-    if (!selected) return;
-    setBusy(true); setError("");
-    try {
-      const r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: selected, pin }) });
-      const data = await r.json();
-      if (!r.ok) { setError(data.error || "Error de acceso"); setBusy(false); return; }
-      onLogin(data.user, data.token);
-    } catch (e) { setError("No se pudo conectar con el servidor."); }
-    setBusy(false);
-  };
-
-  return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 20, background: "var(--primary)", gap: 20 }}>
-      <form onSubmit={submit} className="card" style={{ width: 380, maxWidth: "100%", background: "#111", border: "1px solid #2A2A2A", padding: 32 }}>
-        <div style={{ marginBottom: 30, textAlign: "center" }}>
-          <img src={ONKA_LOGO_PLACEHOLDER} alt="ONKA" style={{ width: 230, maxWidth: "100%", display: "block", margin: "0 auto" }} />
-          <div style={{ height: 1, background: "#2A2A2A", margin: "18px auto 14px", width: 60 }} />
-          <div style={{ fontSize: 11.5, letterSpacing: ".18em", textTransform: "uppercase", color: "#8A8880" }}>Fabricación de mobiliario</div>
-        </div>
-        <h2 style={{ fontSize: 18, marginBottom: 4, color: "#fff" }}>Identifícate</h2>
-        <p style={{ color: "#9A978E", fontSize: 13, marginTop: 4, marginBottom: 16 }}>Selecciona tu usuario para fichar, imputar horas o ver el calendario.</p>
-        <label style={{ fontSize: 12.5, fontWeight: 600, color: "#9A978E" }}>Usuario</label>
-        <select className="input" style={{ marginTop: 6, marginBottom: 12 }} value={selected} onChange={(e) => { setSelected(e.target.value); setError(""); }}>
-          {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-        </select>
-        <label style={{ fontSize: 12.5, fontWeight: 600, color: "#9A978E" }}>PIN</label>
-        <input className="input mono" style={{ marginTop: 6 }} type="password" inputMode="numeric" placeholder="••••" value={pin} onChange={(e) => { setPin(e.target.value); setError(""); }} />
-        {error && <div style={{ color: "#E8845A", fontSize: 12.5, marginTop: 8 }}>{error}</div>}
-        <button className="btn btn-accent" style={{ width: "100%", justifyContent: "center", marginTop: 16 }} type="submit" disabled={busy}>{busy ? "Entrando…" : "Entrar"}</button>
-      </form>
-      {frase && (
-        <div style={{ maxWidth: 380, textAlign: "center", padding: "0 16px" }}>
-          <p style={{ color: "#B8B4AA", fontSize: 13.5, fontStyle: "italic", lineHeight: 1.5, margin: 0 }}>"{frase}"</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* =================================================================
-   SHELL / NAVEGACIÓN
-================================================================= */
-function Shell({ user, api, tab, setTab, onLogout, config, refreshConfig, events, refreshEvents, showToast }) {
-  const isAdmin = user.role === "admin";
-  const puedeProyectos = isAdmin || (config && config.responsablesProyecto.includes(user.id));
-  const puedeAuxiliar = isAdmin || (config && config.responsablesAuxiliar.includes(user.id));
-  const puedeGestion = puedeProyectos || puedeAuxiliar;
-  const roleLabel = { admin: "Administrador", oficina: "Oficina", fabrica: "Fábrica" }[user.role];
-  const pillClass = { admin: "pill-admin", oficina: "pill-office", fabrica: "pill-fabrica" }[user.role];
-
-  const [misFichajes, setMisFichajes] = useState([]);
-  const refreshMisFichajes = useCallback(() => {
-    api("GET", "/api/fichajes").then((rows) => setMisFichajes(rows.filter((f) => f.userId === user.id))).catch(() => {});
-  }, [api, user.id]);
-  useEffect(() => { refreshMisFichajes(); }, [refreshMisFichajes]);
-
-  return (
-    <div>
-      <div style={{ background: "var(--primary)", padding: "18px 20px", color: "#fff", borderBottom: "1px solid #262626" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <img src={ONKA_LOGO_PLACEHOLDER} alt="ONKA" style={{ height: 32, display: "block" }} />
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 13.5, fontWeight: 700 }}>{user.name}</div>
-              <span className={`pill ${pillClass}`}>{roleLabel}</span>
-            </div>
-            <button className="btn btn-ghost btn-sm" style={{ color: "#fff", borderColor: "rgba(255,255,255,0.35)" }} onClick={onLogout}><LogOut size={14} /> Salir</button>
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 4, marginTop: 16, flexWrap: "wrap" }}>
-          <div className={`tab ${tab === "fichaje" ? "active" : ""}`} onClick={() => setTab("fichaje")}><Clock size={15} /> Fichaje</div>
-          <div className={`tab ${tab === "horas" ? "active" : ""}`} onClick={() => setTab("horas")}><FolderKanban size={15} /> Imputación</div>
-          <div className={`tab ${tab === "calendario" ? "active" : ""}`} onClick={() => setTab("calendario")}><CalIcon size={15} /> Calendario</div>
-          {puedeGestion && <div className={`tab ${tab === "admin" ? "active" : ""}`} onClick={() => setTab("admin")}><Settings size={15} /> {isAdmin ? "Administración" : "Gestión"}</div>}
-        </div>
-      </div>
-
-      <div style={{ padding: 20, maxWidth: 1080, margin: "0 auto" }}>
-        {tab === "fichaje" && <Fichaje api={api} user={user} misFichajes={misFichajes} refresh={refreshMisFichajes} showToast={showToast} events={events} />}
-        {tab === "horas" && <ImputacionHoras api={api} user={user} config={config} showToast={showToast} />}
-        {tab === "calendario" && <Calendario api={api} user={user} events={events} refreshEvents={refreshEvents} config={config} />}
-        {tab === "admin" && puedeGestion && <Admin api={api} config={config} refreshConfig={refreshConfig} showToast={showToast} isAdmin={isAdmin} puedeProyectos={puedeProyectos} puedeAuxiliar={puedeAuxiliar} />}
-      </div>
-    </div>
-  );
-}
-
-/* =================================================================
-   ALERTAS
-================================================================= */
-
-/* =================================================================
-   PANTALLA 1 — FICHAJE
-================================================================= */
-function Fichaje({ api, user, misFichajes, refresh, showToast, events }) {
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState(null);
-
-  const sorted = useMemo(() => [...misFichajes].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1)), [misFichajes]);
-  const ultimoHoy = sorted.find((f) => f.date === todayISO());
-  const proximaAccion = !ultimoHoy || ultimoHoy.type === "salida" ? "entrada" : "salida";
-
-  const en30Dias = useMemo(() => { const d = new Date(); d.setDate(d.getDate() + 30); return toISODate(d); }, []);
-  const proximosEventos = useMemo(() => (events || []).filter((e) => e.date >= todayISO() && e.date <= en30Dias).sort((a, b) => (a.date === b.date ? (a.time || "").localeCompare(b.time || "") : (a.date > b.date ? 1 : -1))), [events, en30Dias]);
-
-  const fichar = async () => {
-    setBusy(true); setMsg(null);
-    const pos = await getPosition();
-    let label = null;
-    if (pos) label = await reverseGeocode(pos.lat, pos.lng);
-    try {
-      await api("POST", "/api/fichajes", { type: proximaAccion, lat: pos?.lat ?? null, lng: pos?.lng ?? null, accuracy: pos?.accuracy ?? null, locationLabel: label });
-      setMsg(pos ? `${proximaAccion === "entrada" ? "Entrada" : "Salida"} registrada con ubicación.` : `${proximaAccion === "entrada" ? "Entrada" : "Salida"} registrada, pero no se pudo obtener la ubicación.`);
-      refresh();
-    } catch (e) { showToast("No se pudo registrar el fichaje. Comprueba tu conexión."); }
-    setBusy(false);
-  };
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <div className="layout-2col">
-        <div className="card" style={{ textAlign: "center" }}>
-          <div className="mono" style={{ fontSize: 13, color: "var(--muted)", marginBottom: 6 }}>{DIAS[new Date().getDay()]}, {new Date().getDate()} de {MESES[new Date().getMonth()]}</div>
-          <div className="display mono" style={{ fontSize: 40, fontWeight: 700, margin: "8px 0 18px" }}><RelojEnVivo /></div>
-          <button className={`btn ${proximaAccion === "entrada" ? "btn-primary" : "btn-accent"}`} style={{ width: "100%", justifyContent: "center", padding: "16px", fontSize: 16, borderRadius: 14 }} onClick={fichar} disabled={busy}>
-            <Clock size={18} /> {busy ? "Obteniendo ubicación…" : `Fichar ${proximaAccion}`}
-          </button>
-          {msg && <div style={{ marginTop: 12, fontSize: 12.5, color: "var(--muted)", display: "flex", gap: 6, alignItems: "flex-start", textAlign: "left" }}><MapPin size={14} style={{ flexShrink: 0, marginTop: 2 }} /> <span>{msg}</span></div>}
-          <div style={{ marginTop: 16, fontSize: 11.5, color: "var(--muted)", lineHeight: 1.5 }}>Tu ubicación se registra en el momento del fichaje, sea cual sea el lugar.</div>
-        </div>
-
-        <div className="card">
-          <h3 style={{ fontSize: 15, marginBottom: 12 }}>Tu historial reciente</h3>
-          <div className="table-wrap scrollbar" style={{ maxHeight: 380, overflowY: "auto" }}>
-            <table>
-              <thead><tr><th>Fecha</th><th>Hora</th><th>Tipo</th><th>Ubicación</th></tr></thead>
-              <tbody>
-                {sorted.slice(0, 30).map((f) => (
-                  <tr key={f.id}>
-                    <td className="mono">{f.date}</td><td className="mono">{f.time}</td>
-                    <td><span className="pill" style={{ background: f.type === "entrada" ? "#E7F3EC" : "#FBEAEA", color: f.type === "entrada" ? "var(--ok)" : "var(--warn)" }}>{f.type}{f.automatico ? " · auto" : ""}</span></td>
-                    <td style={{ maxWidth: 260 }}><UbicacionCelda f={f} /></td>
-                  </tr>
-                ))}
-                {sorted.length === 0 && <tr><td colSpan={4} style={{ color: "var(--muted)", textAlign: "center", padding: 20 }}>Todavía no hay fichajes.</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <div className="card">
-        <h3 style={{ fontSize: 14, marginBottom: 10 }}>Próximos eventos (30 días)</h3>
-        {proximosEventos.length === 0 ? (
-          <div style={{ color: "var(--muted)", fontSize: 13 }}>No tienes eventos próximos.</div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {proximosEventos.map((e) => (
-              <div key={e.id} style={{ borderLeft: `3px solid ${colorDeEvento(e)}`, paddingLeft: 8 }}>
-                <div style={{ fontSize: 13, fontWeight: 700 }}>{e.title || TIPO_EVENTO[e.type].label}</div>
-                <div className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>{e.date}{e.time ? " · " + e.time : ""}{e.location ? " · " + e.location : ""}</div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="card">
-        <h3 style={{ fontSize: 14, marginBottom: 10 }}>Horario de la empresa</h3>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 13 }}>
-          <div><strong>Lunes a jueves:</strong> 8:00–10:00 · <span style={{ color: "var(--muted)" }}>10:00–10:30 almuerzo</span> · 10:30–14:00 · <span style={{ color: "var(--muted)" }}>14:00–15:00 comida</span> · 15:00–18:00</div>
-          <div><strong>Viernes:</strong> 8:00–13:30 <span style={{ color: "var(--muted)" }}>(con 30 min de almuerzo, 10:00–10:30)</span></div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function UbicacionCelda({ f }) {
-  if (f.lat == null) return <span style={{ color: f.automatico ? "var(--warn)" : "var(--muted)" }}>{f.locationLabel || "Sin ubicación"}</span>;
-  const mapsUrl = `https://www.google.com/maps?q=${f.lat},${f.lng}`;
-  return <a href={mapsUrl} target="_blank" rel="noreferrer" style={{ color: "var(--ink)", textDecoration: "underline", fontSize: 12.5 }}>{f.locationLabel ? f.locationLabel.split(",").slice(0, 3).join(",") : `${f.lat.toFixed(4)}, ${f.lng.toFixed(4)}`}</a>;
-}
-function RelojEnVivo() {
-  const [now, setNow] = useState(new Date());
-  useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
-  return <>{fmtTime(now)}</>;
-}
-
-/* =================================================================
-   PANTALLA 2 — IMPUTACIÓN DE HORAS
-================================================================= */
-const CONCEPTOS_ESPECIALES = ["Baja médica", "Asuntos propios"];
-const ESPECIAL_COLOR = { "Baja médica": "#B3433A", "Asuntos propios": "#5B6BA8" };
-
-function opcionesDe(config, user) {
-  if (!config) return { proyectos: [], auxiliares: [], especiales: [] };
-  const ordenar = (list) => [...list].sort((a, b) => (a.fixed === b.fixed ? 0 : a.fixed ? 1 : -1));
-  const especiales = config.projects.filter((p) => CONCEPTOS_ESPECIALES.includes(p.name));
-  const proyectos = ordenar(config.projects.filter((p) => !CONCEPTOS_ESPECIALES.includes(p.name)).map((p) => ({ id: p.id, name: p.name, fixed: !!p.fixed })));
-  const auxiliares = user.role === "fabrica" ? ordenar(config.auxTasks.map((t) => ({ id: t.id, name: t.name, fixed: !!t.fixed }))) : [];
-  return { proyectos, auxiliares, especiales };
-}
-
-// Estilo visual (sin la palabra "fijo") para distinguir los conceptos
-// habituales/por defecto del resto, dentro de los desplegables.
-const estiloOpcionFija = { fontStyle: "italic", color: "#8A8680" };
-
-function FamilyToggle({ family, setFamily }) {
-  const opciones = [
-    { key: "proyectos", label: "📁 Proyectos", color: "var(--office)" },
-    { key: "auxiliar", label: "🔧 Auxiliar", color: "var(--fabrica)" },
-  ];
-  return (
-    <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-      {opciones.map((o) => (
-        <button
-          key={o.key}
-          type="button"
-          className="btn btn-sm"
-          onClick={() => setFamily(o.key)}
-          style={{ background: family === o.key ? o.color : o.color + "18", color: family === o.key ? "#fff" : o.color, fontWeight: 700, whiteSpace: "nowrap" }}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function FilaImputacion({ f, opciones, mostrarToggleFamilia, cap, onFamily, onConcepto, onHoras, onRemove }) {
-  const lista = f.family === "auxiliar" ? opciones.auxiliares : opciones.proyectos;
-  return (
-    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-      {mostrarToggleFamilia && <FamilyToggle family={f.family} setFamily={onFamily} />}
-      <select className="input" style={{ flex: 1, minWidth: 170 }} value={f.projectId} onChange={(e) => onConcepto(e.target.value)}>
-        {lista.map((o) => <option key={o.id} value={o.id} style={o.fixed ? estiloOpcionFija : undefined}>{o.name}</option>)}
-      </select>
-      <input className="input mono" style={{ width: 92 }} type="number" step="0.25" min="0" max={cap || 24} placeholder="h" value={f.hours} onChange={(e) => onHoras(e.target.value)} />
-      <button className="btn btn-danger btn-sm" onClick={onRemove}><Trash2 size={14} /></button>
-    </div>
-  );
-}
-
-function ImputacionHoras({ api, user, config, showToast }) {
-  const [fecha, setFecha] = useState(todayISO());
-  const [filas, setFilas] = useState([]);
-  const [excedentes, setExcedentes] = useState([]);
-  const [historial, setHistorial] = useState([]);
-  const [estadoEspecial, setEstadoEspecial] = useState(null); // null | "Baja médica" | "Asuntos propios"
-  const [dirty, setDirty] = useState(false);
-  const { proyectos, auxiliares, especiales } = useMemo(() => opcionesDe(config, user), [config, user]);
-  const opciones = { proyectos, auxiliares };
-  const esFabrica = user.role === "fabrica" && auxiliares.length > 0;
-  const cap = dailyCap(fecha);
-
-  const idsAuxiliares = useMemo(() => new Set(auxiliares.map((a) => a.id)), [auxiliares]);
-  const familiaDe = (projectId) => (idsAuxiliares.has(projectId) ? "auxiliar" : "proyectos");
-  const resolverNombre = (family, id) => (family === "auxiliar" ? auxiliares : proyectos).find((o) => o.id === id)?.name || "—";
-
-  const nuevaFila = (family) => ({ id: "n" + Math.random(), family, projectId: (family === "auxiliar" ? auxiliares : proyectos)[0]?.id || "", hours: "" });
-
-  const cargarDia = useCallback((f) => {
-    api("GET", "/api/imputaciones?date=" + f).then((rows) => {
-      const principales = rows.filter((r) => !r.excedente);
-      const extra = rows.filter((r) => r.excedente);
-      const especialEncontrado = principales.length === 1 && CONCEPTOS_ESPECIALES.includes(principales[0].projectName) ? principales[0].projectName : null;
-      setEstadoEspecial(especialEncontrado);
-      setFilas(!especialEncontrado && principales.length ? principales.map((r) => ({ id: r.id, family: familiaDe(r.projectId), projectId: r.projectId, hours: String(r.hours) })) : [nuevaFila("proyectos")]);
-      setExcedentes(extra.map((r) => ({ id: r.id, family: familiaDe(r.projectId), projectId: r.projectId, hours: String(r.hours) })));
-      setDirty(false);
-    }).catch(() => {});
-  }, [api, proyectos, auxiliares]); // eslint-disable-line
-
-  useEffect(() => { if (config) cargarDia(fecha); }, [fecha, config]); // eslint-disable-line
-  useEffect(() => { api("GET", "/api/imputaciones").then(setHistorial).catch(() => {}); }, [api]);
-
-  const totalPrincipal = filas.reduce((s, f) => s + (parseFloat(f.hours) || 0), 0);
-  const totalExcedente = excedentes.reduce((s, f) => s + (parseFloat(f.hours) || 0), 0);
-  const excedeCap = totalPrincipal > cap + 0.001;
-
-  const addFila = () => { setFilas((f) => [...f, nuevaFila("proyectos")]); setDirty(true); };
-  const removeFila = (id) => { setFilas((f) => f.filter((x) => x.id !== id)); setDirty(true); };
-  const updateFila = (id, patch) => { setFilas((f) => f.map((x) => (x.id === id ? { ...x, ...patch } : x))); setDirty(true); };
-  const quickFill = (family, projectId) => { setFilas([{ id: "n" + Math.random(), family, projectId, hours: String(cap) }]); setDirty(true); };
-
-  const toggleEspecial = (nombre) => { setEstadoEspecial((actual) => (actual === nombre ? null : nombre)); setDirty(true); };
-
-  const redondear = (n) => Math.round(n * 100) / 100;
-  const updateFilaHoras = (id, rawValue) => {
-    if (rawValue === "") { updateFila(id, { hours: "" }); return; }
-    const num = parseFloat(rawValue);
-    if (isNaN(num)) { updateFila(id, { hours: rawValue }); return; }
-    const otras = filas.filter((f) => f.id !== id).reduce((s, f) => s + (parseFloat(f.hours) || 0), 0);
-    const restante = redondear(Math.max(0, cap - otras));
-    if (num > restante) {
-      showToast(cap === 0 ? "Este día no admite horas de jornada principal (fin de semana). Usa \"Horas excedentes\"." : `Máximo ${cap}h de jornada principal ese día — te quedan ${restante}h disponibles aquí.`);
-      updateFila(id, { hours: restante > 0 ? String(restante) : "" });
-    } else {
-      updateFila(id, { hours: rawValue });
-    }
-  };
-
-  const addExcedente = () => { setExcedentes((f) => [...f, nuevaFila("proyectos")]); setDirty(true); };
-  const removeExcedente = (id) => { setExcedentes((f) => f.filter((x) => x.id !== id)); setDirty(true); };
-  const updateExcedente = (id, patch) => { setExcedentes((f) => f.map((x) => (x.id === id ? { ...x, ...patch } : x))); setDirty(true); };
-
-  const cambiarFamiliaFila = (setter) => (id, family) => setter((f) => f.map((x) => (x.id === id ? { ...x, family, projectId: (family === "auxiliar" ? auxiliares : proyectos)[0]?.id || "" } : x)));
-  const cambiarFamiliaFilaP = cambiarFamiliaFila(setFilas);
-  const cambiarFamiliaExc = cambiarFamiliaFila(setExcedentes);
-
-  const guardar = async () => {
-    if (!estadoEspecial && excedeCap) { showToast(`Las horas de la jornada principal no pueden superar ${cap}h. Usa "Horas excedentes" para el resto.`); return; }
-    let entriesPrincipales;
-    if (estadoEspecial) {
-      const item = especiales.find((e) => e.name === estadoEspecial);
-      entriesPrincipales = item && cap > 0 ? [{ projectId: item.id, projectName: item.name, hours: String(cap), excedente: false }] : [];
-    } else {
-      entriesPrincipales = filas.filter((f) => f.projectId && parseFloat(f.hours) > 0).map((f) => ({ projectId: f.projectId, projectName: resolverNombre(f.family, f.projectId), hours: f.hours, excedente: false }));
-    }
-    const entries = [
-      ...entriesPrincipales,
-      ...excedentes.filter((f) => f.projectId && parseFloat(f.hours) > 0).map((f) => ({ projectId: f.projectId, projectName: resolverNombre(f.family, f.projectId), hours: f.hours, excedente: true })),
-    ];
-    try {
-      await api("PUT", "/api/imputaciones/day", { date: fecha, entries });
-      showToast("Imputación guardada.");
-      cargarDia(fecha);
-      api("GET", "/api/imputaciones").then(setHistorial).catch(() => {});
-    } catch (e) { showToast(e.message || "No se pudo guardar."); }
-  };
-
-  const roleTag = { oficina: "Oficina", fabrica: "Fábrica", admin: "Administrador" }[user.role];
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20, paddingBottom: dirty ? 74 : 0 }}>
-      <div className="card">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 4 }}>
-          <div>
-            <h3 style={{ fontSize: 15 }}>Imputar horas del día</h3>
-            <div style={{ fontSize: 12, color: "var(--muted)" }}>{roleTag} · máximo jornada principal: <strong>{cap}h</strong></div>
-          </div>
-          <input type="date" className="input mono" style={{ width: 170 }} value={fecha} onChange={(e) => setFecha(e.target.value)} />
-        </div>
-
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "14px 0" }}>
-          {especiales.map((esp) => {
-            const color = ESPECIAL_COLOR[esp.name] || "#666";
-            const activo = estadoEspecial === esp.name;
-            return (
-              <button
-                key={esp.id}
-                onClick={() => toggleEspecial(esp.name)}
-                className="btn btn-sm"
-                style={{ background: activo ? color : color + "18", color: activo ? "#fff" : color, border: `1px solid ${color}55`, fontWeight: 700 }}
-              >
-                {activo && <Check size={13} />} {esp.name}
-              </button>
-            );
-          })}
-        </div>
-
-        {estadoEspecial ? (
-          <div style={{ padding: "12px 14px", borderRadius: 10, background: (ESPECIAL_COLOR[estadoEspecial] || "#666") + "14", border: `1px solid ${(ESPECIAL_COLOR[estadoEspecial] || "#666")}40`, fontSize: 13, color: ESPECIAL_COLOR[estadoEspecial] }}>
-            Día marcado como <strong>{estadoEspecial}</strong>{cap > 0 ? ` — se registrarán ${cap}h bajo este concepto.` : " — este día no tiene jornada principal (fin de semana)."} Vuelve a pulsar el botón para quitar la marca.
-          </div>
-        ) : (
-          <>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, margin: "14px 0" }}>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                <span style={{ fontSize: 12, color: "var(--muted)" }}>📁 Jornada completa en Proyectos ({cap}h):</span>
-                {proyectos.slice(0, 4).map((o) => <button key={o.id} className="btn btn-ghost btn-sm" onClick={() => quickFill("proyectos", o.id)}>{o.name}</button>)}
-              </div>
-              {esFabrica && (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <span style={{ fontSize: 12, color: "var(--muted)" }}>🔧 Jornada completa en Auxiliar ({cap}h):</span>
-                  {auxiliares.slice(0, 4).map((o) => <button key={o.id} className="btn btn-ghost btn-sm" onClick={() => quickFill("auxiliar", o.id)}>{o.name}</button>)}
-                </div>
-              )}
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {filas.map((f) => (
-                <FilaImputacion
-                  key={f.id} f={f} opciones={opciones} mostrarToggleFamilia={esFabrica} cap={cap}
-                  onFamily={(fam) => cambiarFamiliaFilaP(f.id, fam)}
-                  onConcepto={(v) => updateFila(f.id, { projectId: v })}
-                  onHoras={(v) => updateFilaHoras(f.id, v)}
-                  onRemove={() => removeFila(f.id)}
-                />
-              ))}
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14 }}>
-              <button className="btn btn-ghost btn-sm" onClick={addFila}><Plus size={14} /> Añadir concepto</button>
-              <div style={{ fontSize: 13, fontWeight: 700 }}>Total: <span className="mono" style={{ color: excedeCap ? "var(--warn)" : "var(--ink)" }}>{totalPrincipal}h</span> <span style={{ color: "var(--muted)", fontWeight: 400 }}>/ {cap}h</span></div>
-            </div>
-            {excedeCap && <div style={{ marginTop: 10, fontSize: 12.5, color: "var(--warn)", display: "flex", gap: 6, alignItems: "flex-start" }}><AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} /><span>Superas el máximo de {cap}h para este día. Mueve el resto a "Horas excedentes" más abajo.</span></div>}
-          </>
-        )}
-      </div>
-
-      <div className="card" style={{ borderColor: "#EAD9BE", background: "#FBF6EE" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-          <div>
-            <h3 style={{ fontSize: 14, color: "var(--accent-ink)" }}>⏱ Horas excedentes</h3>
-            <div style={{ fontSize: 12, color: "var(--muted)" }}>Horas trabajadas fuera de la jornada principal (no cuentan para el límite de {cap}h).</div>
-          </div>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
-          {excedentes.map((f) => (
-            <FilaImputacion
-              key={f.id} f={f} opciones={opciones} mostrarToggleFamilia={esFabrica} cap={24}
-              onFamily={(fam) => cambiarFamiliaExc(f.id, fam)}
-              onConcepto={(v) => updateExcedente(f.id, { projectId: v })}
-              onHoras={(v) => updateExcedente(f.id, { hours: v })}
-              onRemove={() => removeExcedente(f.id)}
-            />
-          ))}
-        </div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12 }}>
-          <button className="btn btn-ghost btn-sm" onClick={addExcedente}><Plus size={14} /> Añadir hora excedente</button>
-          {totalExcedente > 0 && <div style={{ fontSize: 13, fontWeight: 700, color: "var(--accent-ink)" }}>Excedente: <span className="mono">{totalExcedente}h</span></div>}
-        </div>
-      </div>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <button className="btn btn-primary" style={{ justifyContent: "center", padding: "14px", fontSize: 15, borderRadius: 12, boxShadow: dirty ? "0 0 0 3px #A9762E55" : "none" }} onClick={guardar}>
-          <Check size={16} /> Guardar imputación del día
-        </button>
-        <div style={{ fontSize: 11.5, color: "var(--muted)", textAlign: "center" }}>Los cambios no se guardan solos — pulsa este botón siempre que añadas o cambies algo.</div>
-      </div>
-
-      <div className="card">
-        <h3 style={{ fontSize: 15, marginBottom: 10 }}>Tus últimos días imputados</h3>
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>Fecha</th><th>Concepto</th><th>Horas</th><th></th></tr></thead>
-            <tbody>
-              {historial.map((i) => <tr key={i.id}><td className="mono">{i.date}</td><td>{i.projectName}</td><td className="mono">{i.hours}h</td><td>{i.excedente && <span className="pill" style={{ background: "#FBF0DC", color: "var(--accent-ink)" }}>excedente</span>}</td></tr>)}
-              {historial.length === 0 && <tr><td colSpan={4} style={{ color: "var(--muted)", textAlign: "center", padding: 16 }}>Todavía no hay imputaciones.</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {dirty && (
-        <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 40, padding: "10px 16px", background: "#0A0A0A", display: "flex", alignItems: "center", justifyContent: "center", gap: 14, boxShadow: "0 -6px 20px rgba(0,0,0,.2)" }}>
-          <span style={{ color: "#fff", fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}><AlertTriangle size={16} color="var(--accent)" /> Tienes cambios sin guardar</span>
-          <button className="btn btn-accent btn-sm" onClick={guardar}><Check size={14} /> Guardar ahora</button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* =================================================================
-   PANTALLA 3 — CALENDARIO
-================================================================= */
-const TIPO_EVENTO = { festivo: { label: "Festivo", color: "#C1440E" }, vacaciones: { label: "Vacaciones", color: "#3B6FA0" }, evento: { label: "Evento", color: "#5B6BA8" } };
-const AMBITO_LABEL = { nacional: "Nacional", autonomico: "Autonómico", local: "Local" };
-const COLOR_FESTIVO_AMBITO = { nacional: "#C1440E", autonomico: "#B98A2E", local: "#6B5B45" };
-const colorDeEvento = (e) => (e.type === "festivo" ? (COLOR_FESTIVO_AMBITO[e.festivoScope] || COLOR_FESTIVO_AMBITO.nacional) : TIPO_EVENTO[e.type].color);
-
-function Calendario({ api, user, events, refreshEvents, config }) {
-  const [cursor, setCursor] = useState(new Date());
-  const [diaSel, setDiaSel] = useState(null);
-  const puedeGestionar = user.role === "admin" || (config && (config.responsablesProyecto.includes(user.id) || config.responsablesAuxiliar.includes(user.id)));
-  const year = cursor.getFullYear(); const month = cursor.getMonth();
-  const firstDay = new Date(year, month, 1);
-  const startOffset = (firstDay.getDay() + 6) % 7;
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const cells = []; for (let i = 0; i < startOffset; i++) cells.push(null); for (let d = 1; d <= daysInMonth; d++) cells.push(d);
-  const eventosDe = (iso) => events.filter((e) => e.date === iso);
-
-  return (
-    <div className="layout-cal">
-      <div className="card">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <button className="btn btn-ghost btn-sm" onClick={() => setCursor(new Date(year, month - 1, 1))}><ChevronLeft size={14} /></button>
-          <h3 style={{ fontSize: 16 }}>{MESES[month]} {year}</h3>
-          <button className="btn btn-ghost btn-sm" onClick={() => setCursor(new Date(year, month + 1, 1))}><ChevronRight size={14} /></button>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4, fontSize: 11, color: "var(--muted)", marginBottom: 4, textTransform: "uppercase", fontWeight: 700 }}>
-          {["L", "M", "X", "J", "V", "S", "D"].map((d) => <div key={d} style={{ textAlign: "center" }}>{d}</div>)}
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4, gridAutoRows: "1fr" }}>
-          {cells.map((d, idx) => {
-            if (d === null) return <div key={idx} />;
-            const iso = `${year}-${pad(month + 1)}-${pad(d)}`;
-            const evs = eventosDe(iso); const finde = isWeekend(iso); const esHoy = iso === todayISO();
-            const diaCompletoEv = evs.find((e) => e.type === "vacaciones") || evs.find((e) => e.type === "festivo" && (e.festivoScope === "nacional" || e.festivoScope === "autonomico"));
-            const colorFondo = diaCompletoEv ? colorDeEvento(diaCompletoEv) : null;
-            const tagsLinea = evs.filter((e) => e !== diaCompletoEv);
-            const visibles = tagsLinea.slice(0, 2); const resto = tagsLinea.length - visibles.length;
-            return (
-              <div key={idx} className="cal-cell" onClick={() => setDiaSel(iso)} style={{ border: esHoy ? "2px solid var(--primary)" : "1px solid var(--line)", background: colorFondo ? colorFondo + "30" : (finde ? "#FAFAF8" : "#fff") }}>
-                <div className="mono" style={{ fontSize: 11, color: finde && !colorFondo ? "var(--muted)" : "var(--ink)", fontWeight: colorFondo ? 700 : 400 }}>{d}</div>
-                {visibles.map((e) => <div key={e.id} className="cal-tag" style={{ background: colorDeEvento(e) + "22", color: colorDeEvento(e) }}>{e.time ? e.time + " " : ""}{e.title || TIPO_EVENTO[e.type].label}</div>)}
-                {resto > 0 && <div className="cal-tag" style={{ background: "#EEECE6", color: "var(--muted)" }}>+{resto} más</div>}
-              </div>
-            );
-          })}
-        </div>
-        <div style={{ display: "flex", gap: 14, marginTop: 14, fontSize: 12, flexWrap: "wrap" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 3, background: COLOR_FESTIVO_AMBITO.nacional, display: "inline-block" }} /> Festivo nacional</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 3, background: COLOR_FESTIVO_AMBITO.autonomico, display: "inline-block" }} /> Festivo autonómico</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 3, background: TIPO_EVENTO.vacaciones.color, display: "inline-block" }} /> Vacaciones</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 3, background: COLOR_FESTIVO_AMBITO.local, display: "inline-block" }} /> Festivo local</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 3, background: TIPO_EVENTO.evento.color, display: "inline-block" }} /> Evento</div>
-        </div>
-        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 10 }}>Toca cualquier día para ver el detalle{puedeGestionar ? " o añadir un evento" : ""}. Los festivos nacionales/autonómicos y las vacaciones colorean todo el día; el festivo local aparece como aviso.</div>
-      </div>
-
-      <div className="card">
-        <h3 style={{ fontSize: 14, marginBottom: 10 }}>Próximos eventos</h3>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 420, overflowY: "auto" }} className="scrollbar">
-          {events.filter((e) => e.date >= todayISO()).sort((a, b) => (a.date > b.date ? 1 : -1)).slice(0, 20).map((e) => (
-            <div key={e.id} style={{ borderLeft: `3px solid ${colorDeEvento(e)}`, paddingLeft: 8, cursor: "pointer" }} onClick={() => setDiaSel(e.date)}>
-              <div style={{ fontSize: 12.5, fontWeight: 700 }}>{e.title || TIPO_EVENTO[e.type].label}</div>
-              <div className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>{e.date}{e.time ? " · " + e.time : ""} · {TIPO_EVENTO[e.type].label}</div>
-            </div>
-          ))}
-          {events.filter((e) => e.date >= todayISO()).length === 0 && <div style={{ color: "var(--muted)", fontSize: 12.5 }}>No hay eventos próximos.</div>}
-        </div>
-      </div>
-
-      {diaSel && (
-        <DayModal
-          fecha={diaSel} eventos={eventosDe(diaSel)} isAdmin={puedeGestionar} users={config?.users || []}
-          onClose={() => setDiaSel(null)}
-          onAdd={async (ev) => { await api("POST", "/api/events", { date: diaSel, ...ev }); refreshEvents(); }}
-          onDelete={async (id) => { await api("DELETE", "/api/events/" + id); refreshEvents(); }}
-        />
-      )}
-    </div>
-  );
-}
-
-function nombreUsuario(users, id) { return users.find((u) => u.id === id)?.name || "—"; }
-
-function DayModal({ fecha, eventos, isAdmin, users, onClose, onAdd, onDelete }) {
-  const [creando, setCreando] = useState(false);
-  return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(20,25,35,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16 }} onClick={onClose}>
-      <div className="card scrollbar" style={{ width: 460, maxWidth: "100%", maxHeight: "88vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <h3 style={{ fontSize: 16 }} className="mono">{fecha}</h3>
-          <button className="btn btn-ghost btn-sm" onClick={onClose}><X size={14} /></button>
-        </div>
-
-        {eventos.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
-            {eventos.map((e) => <EventoDetalle key={e.id} e={e} users={users} isAdmin={isAdmin} onDelete={onDelete} />)}
-          </div>
-        )}
-        {eventos.length === 0 && !isAdmin && <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 10 }}>No hay eventos este día.</div>}
-
-        {isAdmin && !creando && <button className="btn btn-primary btn-sm" onClick={() => setCreando(true)}><Plus size={14} /> Añadir evento</button>}
-        {isAdmin && creando && <FormularioEvento users={users} onCancel={() => setCreando(false)} onSave={async (ev) => { await onAdd(ev); setCreando(false); }} />}
-      </div>
-    </div>
-  );
-}
-
-function EventoDetalle({ e, users, isAdmin, onDelete }) {
-  const info = TIPO_EVENTO[e.type];
-  const color = colorDeEvento(e);
-  return (
-    <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-        <div>
-          <span className="pill" style={{ background: color + "22", color: color }}>{info.label}{e.type === "festivo" ? ` · ${AMBITO_LABEL[e.festivoScope] || "Nacional"}` : ""}</span>
-          <div style={{ fontWeight: 700, fontSize: 14, marginTop: 6 }}>{e.title || info.label}</div>
-        </div>
-        {isAdmin && <button className="btn btn-danger btn-sm" onClick={() => onDelete(e.id)}><Trash2 size={13} /></button>}
-      </div>
-      <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
-        {e.time && <div>🕐 {e.time}</div>}
-        {e.location && <div>📍 {e.location}</div>}
-        {e.type === "festivo" && <div>{AMBITO_LABEL[e.festivoScope] || "Nacional"}{e.festivoLugar ? ` · ${e.festivoLugar}` : ""}{(e.festivoScope === "local") ? " · no exime de fichar a quien no sea de esa localidad" : ""}</div>}
-        {e.type === "evento" && <div>👥 {e.invitados === "todos" ? "Todos los trabajadores" : (e.invitados || []).map((id) => nombreUsuario(users, id)).join(", ") || "Sin convocados"}</div>}
-      </div>
-      {e.description && <div style={{ fontSize: 13, marginTop: 10, borderTop: "1px solid var(--line)", paddingTop: 10, whiteSpace: "pre-wrap" }}>{e.description}</div>}
-    </div>
-  );
-}
-
-function FormularioEvento({ users, onCancel, onSave }) {
-  const [tipo, setTipo] = useState("evento");
-  const [titulo, setTitulo] = useState("");
-  const [hora, setHora] = useState("");
-  const [lugar, setLugar] = useState("");
-  const [descripcion, setDescripcion] = useState("");
-  const [todos, setTodos] = useState(true);
-  const [seleccionados, setSeleccionados] = useState([]);
-  const [ambito, setAmbito] = useState("nacional");
-  const [festivoLugar, setFestivoLugar] = useState("");
-
-  const toggleUsuario = (id) => setSeleccionados((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
-
-  const guardar = () => {
-    const ev = { type: tipo, title: titulo };
-    if (tipo === "evento") {
-      ev.time = hora || null; ev.location = lugar; ev.description = descripcion;
-      ev.invitados = todos ? "todos" : seleccionados;
-    }
-    if (tipo === "festivo") { ev.festivoScope = ambito; ev.festivoLugar = ambito === "nacional" ? "" : festivoLugar; }
-    onSave(ev);
-  };
-
-  return (
-    <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 14 }}>
-      <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>Tipo</label>
-      <select className="input" style={{ margin: "6px 0 10px" }} value={tipo} onChange={(e) => setTipo(e.target.value)}>
-        <option value="evento">Evento / Reunión</option>
-        <option value="festivo">Festivo</option>
-        <option value="vacaciones">Vacaciones</option>
-      </select>
-
-      <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>Título</label>
-      <input className="input" style={{ margin: "6px 0 10px" }} placeholder={tipo === "evento" ? "Ej. Reunión de producción" : tipo === "festivo" ? "Ej. Fiestas del pueblo" : "Ej. Vacaciones de verano"} value={titulo} onChange={(e) => setTitulo(e.target.value)} />
-
-      {tipo === "festivo" && (
-        <>
-          <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>Ámbito</label>
-          <select className="input" style={{ margin: "6px 0 10px" }} value={ambito} onChange={(e) => setAmbito(e.target.value)}>
-            <option value="nacional">Nacional (afecta a todos, elimina la alerta de fichaje)</option>
-            <option value="autonomico">Autonómico (afecta a todos, elimina la alerta de fichaje)</option>
-            <option value="local">Local (informativo — NO elimina la alerta de fichaje)</option>
-          </select>
-          {ambito !== "nacional" && (
-            <>
-              <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>{ambito === "autonomico" ? "Comunidad autónoma" : "Localidad"}</label>
-              <input className="input" style={{ margin: "6px 0 10px" }} placeholder={ambito === "autonomico" ? "Ej. Comunidad de Madrid" : "Ej. Alcorcón"} value={festivoLugar} onChange={(e) => setFestivoLugar(e.target.value)} />
-            </>
-          )}
-        </>
-      )}
-
-      {tipo === "evento" && (
-        <>
-          <div style={{ display: "flex", gap: 8 }}>
-            <div style={{ flex: 1 }}><label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>Hora</label><input type="time" className="input mono" style={{ marginTop: 6 }} value={hora} onChange={(e) => setHora(e.target.value)} /></div>
-            <div style={{ flex: 2 }}><label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>Ubicación</label><input className="input" style={{ marginTop: 6 }} placeholder="Ej. Sala de reuniones" value={lugar} onChange={(e) => setLugar(e.target.value)} /></div>
-          </div>
-          <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", display: "block", marginTop: 10 }}>De qué trata</label>
-          <textarea className="input" style={{ marginTop: 6 }} placeholder="Comentario o nota explicando el evento…" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} />
-
-          <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", display: "block", marginTop: 12 }}>Convocados</label>
-          <div className="checkrow"><input type="checkbox" checked={todos} onChange={(e) => setTodos(e.target.checked)} id="todos-cb" /><label htmlFor="todos-cb">Todos los trabajadores</label></div>
-          {!todos && (
-            <div style={{ maxHeight: 140, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 8, padding: "4px 10px", marginTop: 4 }} className="scrollbar">
-              {users.filter((u) => u.role !== "admin").map((u) => (
-                <div className="checkrow" key={u.id}><input type="checkbox" checked={seleccionados.includes(u.id)} onChange={() => toggleUsuario(u.id)} id={"u-" + u.id} /><label htmlFor={"u-" + u.id}>{u.name}</label></div>
-              ))}
-            </div>
-          )}
-
-        </>
-      )}
-
-      <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-        <button className="btn btn-ghost" style={{ flex: 1, justifyContent: "center" }} onClick={onCancel}>Cancelar</button>
-        <button className="btn btn-primary" style={{ flex: 1, justifyContent: "center" }} onClick={guardar} disabled={!titulo.trim()}><Plus size={14} /> Guardar</button>
-      </div>
-    </div>
-  );
-}
-
-/* =================================================================
-   ADMINISTRACIÓN
-================================================================= */
-function Admin({ api, config, refreshConfig, showToast, isAdmin, puedeProyectos, puedeAuxiliar }) {
-  const tabsDisponibles = [
-    isAdmin && ["informes", "Informes", <Download size={14} key="i" />],
-    isAdmin && ["usuarios", "Usuarios", <Users size={14} key="u" />],
-    puedeProyectos && ["proyectos", "Proyectos", <Briefcase size={14} key="p" />],
-    puedeAuxiliar && ["auxiliar", "Auxiliares", <Cog size={14} key="a" />],
-    isAdmin && ["frases", "Frase motivacional", <BellRing size={14} key="f" />],
-  ].filter(Boolean);
-  const [sub, setSub] = useState(tabsDisponibles[0]?.[0] || "proyectos");
-  return (
-    <div>
-      <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
-        {tabsDisponibles.map(([k, label, icon]) => (
-          <button key={k} className={`btn btn-sm ${sub === k ? "btn-primary" : "btn-ghost"}`} onClick={() => setSub(k)}>{icon}{label}</button>
-        ))}
-      </div>
-      {sub === "informes" && isAdmin && <Informes api={api} />}
-      {sub === "usuarios" && isAdmin && <GestionUsuarios api={api} refreshConfig={refreshConfig} showToast={showToast} />}
-      {sub === "proyectos" && puedeProyectos && <GestionFamilia api={api} config={config} refreshConfig={refreshConfig} showToast={showToast} familia="proyectos" />}
-      {sub === "auxiliar" && puedeAuxiliar && <GestionFamilia api={api} config={config} refreshConfig={refreshConfig} showToast={showToast} familia="auxiliares" />}
-      {sub === "frases" && isAdmin && <GestionFrases api={api} showToast={showToast} />}
-    </div>
-  );
-}
-
-function Informes({ api }) {
-  const [desde, setDesde] = useState(toISODate(new Date(new Date().getFullYear(), new Date().getMonth(), 1)));
-  const [hasta, setHasta] = useState(todayISO());
-  const [fichajes, setFichajes] = useState([]);
-  const [imputaciones, setImputaciones] = useState([]);
-  const [cargando, setCargando] = useState(false);
-
-  const cargar = useCallback(() => {
-    setCargando(true);
-    Promise.all([api("GET", `/api/fichajes?desde=${desde}&hasta=${hasta}`), api("GET", `/api/imputaciones/report?desde=${desde}&hasta=${hasta}`)])
-      .then(([f, i]) => { setFichajes(f); setImputaciones(i); }).finally(() => setCargando(false));
-  }, [api, desde, hasta]);
-  useEffect(() => { cargar(); }, [cargar]);
-
-  const diasDelRango = () => {
-    const dias = [];
-    let d = new Date(desde + "T00:00:00");
-    const fin = new Date(hasta + "T00:00:00");
-    while (d <= fin) { dias.push(toISODate(d)); d.setDate(d.getDate() + 1); }
-    return dias;
-  };
-  const claveDia = (iso) => { const [, m, dd] = iso.split("-"); return dd + "/" + m; };
-
-  const pivotHorasPorTrabajador = () => {
-    const dias = diasDelRango();
-    const trabajadores = [...new Set(imputaciones.map((i) => i.userName))].sort();
-    const filas = [];
-    trabajadores.forEach((nombre) => {
-      [["normal", "Horas normales"], ["excedente", "Horas excedentes"]].forEach(([tipo, etiqueta]) => {
-        const fila = { Trabajador: nombre, Tipo: etiqueta };
-        let total = 0;
-        dias.forEach((f) => {
-          const suma = imputaciones.filter((i) => i.userName === nombre && i.date === f && (tipo === "excedente" ? i.excedente : !i.excedente)).reduce((s, i) => s + i.hours, 0);
-          if (suma > 0) { fila[claveDia(f)] = suma; total += suma; } else { fila[claveDia(f)] = ""; }
-        });
-        fila["Total"] = total;
-        if (total > 0) filas.push(fila);
-      });
+  if (pathname === "/api/frase-actual" && req.method === "GET") {
+    const data = await loadData();
+    const frases = data.frases || [];
+    if (!frases.length) return sendJSON(res, 200, { texto: null });
+    const dias = Math.floor(Date.now() / 86400000);
+    const idx = Math.floor(dias / 14) % frases.length;
+    return sendJSON(res, 200, { texto: frases[idx].texto });
+  }
+
+  if (pathname === "/api/login" && req.method === "POST") {
+    const body = await readBody(req);
+    const data = await loadData();
+    const user = data.users.find((u) => u.id === body.userId);
+    if (!user || String(user.pin || "") !== String(body.pin || "")) return sendJSON(res, 401, { error: "Usuario o PIN incorrecto" });
+    const token = await createSession(user);
+    return sendJSON(res, 200, { token, user: { id: user.id, name: user.name, role: user.role } });
+  }
+
+  const session = await auth(req);
+  if (!session) return sendJSON(res, 401, { error: "No autenticado" });
+
+  if (pathname === "/api/logout" && req.method === "POST") {
+    await persist((data) => { delete data.sessions[session.token]; return data; });
+    return sendJSON(res, 200, { ok: true });
+  }
+
+  // ---- Configuración de referencia ----
+  if (pathname === "/api/config" && req.method === "GET") {
+    const data = await loadData();
+    return sendJSON(res, 200, {
+      projects: data.projects,
+      auxTasks: data.auxTasks,
+      responsablesProyecto: data.responsablesProyecto,
+      responsablesAuxiliar: data.responsablesAuxiliar,
+      users: data.users.map((u) => ({ id: u.id, name: u.name, role: u.role })),
+      me: session,
     });
-    return filas;
-  };
+  }
 
-  const pivotPorConcepto = () => {
-    const conceptos = [...new Set(imputaciones.map((i) => i.projectName))].sort();
-    const trabajadores = [...new Set(imputaciones.map((i) => i.userName))].sort();
-    return conceptos.map((concepto) => {
-      const fila = { Concepto: concepto };
-      let total = 0;
-      trabajadores.forEach((t) => {
-        const suma = imputaciones.filter((i) => i.projectName === concepto && i.userName === t).reduce((s, i) => s + i.hours, 0);
-        fila[t] = suma > 0 ? suma : "";
-        total += suma;
-      });
-      fila["Total"] = total;
-      return fila;
+  // ---- Familia "Proyectos" (oficina + fábrica) ----
+  const puedeProyectos = (data) => isAdmin(session) || data.responsablesProyecto.includes(session.userId);
+  if (pathname === "/api/projects" && req.method === "POST") {
+    const data = await loadData();
+    if (!puedeProyectos(data)) return sendJSON(res, 403, { error: "No autorizado a crear proyectos" });
+    const body = await readBody(req);
+    if (!body.name || !body.name.trim()) return sendJSON(res, 400, { error: "Nombre requerido" });
+    const project = { id: uid(), name: body.name.trim(), fixed: !!body.fixed };
+    const updated = await persist((d) => { d.projects.push(project); return d; });
+    return sendJSON(res, 200, updated.projects);
+  }
+  if (pathname.match(/^\/api\/projects\/[^/]+$/) && req.method === "PATCH") {
+    const data = await loadData();
+    if (!puedeProyectos(data)) return sendJSON(res, 403, { error: "No autorizado" });
+    const id = pathname.split("/").pop();
+    const body = await readBody(req);
+    const updated = await persist((d) => { d.projects = d.projects.map((p) => (p.id === id ? { ...p, ...(body.name !== undefined ? { name: body.name } : {}), ...(body.fixed !== undefined ? { fixed: !!body.fixed } : {}) } : p)); return d; });
+    return sendJSON(res, 200, updated.projects);
+  }
+  if (pathname.match(/^\/api\/projects\/[^/]+$/) && req.method === "DELETE") {
+    const data = await loadData();
+    if (!puedeProyectos(data)) return sendJSON(res, 403, { error: "No autorizado" });
+    const id = pathname.split("/").pop();
+    const target = data.projects.find((p) => p.id === id);
+    if (target && target.fixed) return sendJSON(res, 400, { error: "Este proyecto es fijo — desmárcalo antes de borrarlo" });
+    const updated = await persist((d) => { d.projects = d.projects.filter((p) => p.id !== id); return d; });
+    return sendJSON(res, 200, updated.projects);
+  }
+
+  // ---- Familia "Auxiliares" (solo fábrica) ----
+  const puedeAuxiliar = (data) => isAdmin(session) || data.responsablesAuxiliar.includes(session.userId);
+  if (pathname === "/api/aux-tasks" && req.method === "POST") {
+    const data = await loadData();
+    if (!puedeAuxiliar(data)) return sendJSON(res, 403, { error: "No autorizado a crear trabajos auxiliares" });
+    const body = await readBody(req);
+    if (!body.name || !body.name.trim()) return sendJSON(res, 400, { error: "Nombre requerido" });
+    const task = { id: uid(), name: body.name.trim(), fixed: !!body.fixed };
+    const updated = await persist((d) => { d.auxTasks.push(task); return d; });
+    return sendJSON(res, 200, updated.auxTasks);
+  }
+  if (pathname.match(/^\/api\/aux-tasks\/[^/]+$/) && req.method === "PATCH") {
+    const data = await loadData();
+    if (!puedeAuxiliar(data)) return sendJSON(res, 403, { error: "No autorizado" });
+    const id = pathname.split("/").pop();
+    const body = await readBody(req);
+    const updated = await persist((d) => { d.auxTasks = d.auxTasks.map((t) => (t.id === id ? { ...t, ...(body.name !== undefined ? { name: body.name } : {}), ...(body.fixed !== undefined ? { fixed: !!body.fixed } : {}) } : t)); return d; });
+    return sendJSON(res, 200, updated.auxTasks);
+  }
+  if (pathname.match(/^\/api\/aux-tasks\/[^/]+$/) && req.method === "DELETE") {
+    const data = await loadData();
+    if (!puedeAuxiliar(data)) return sendJSON(res, 403, { error: "No autorizado" });
+    const id = pathname.split("/").pop();
+    const target = data.auxTasks.find((t) => t.id === id);
+    if (target && target.fixed) return sendJSON(res, 400, { error: "Este trabajo es fijo — desmárcalo antes de borrarlo" });
+    const updated = await persist((d) => { d.auxTasks = d.auxTasks.filter((t) => t.id !== id); return d; });
+    return sendJSON(res, 200, updated.auxTasks);
+  }
+
+  // ---- Usuarios (solo admin) ----
+  if (pathname === "/api/users" && req.method === "GET") {
+    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    return sendJSON(res, 200, (await loadData()).users);
+  }
+  if (pathname === "/api/users" && req.method === "POST") {
+    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    const body = await readBody(req);
+    if (!body.name || !body.name.trim()) return sendJSON(res, 400, { error: "Nombre requerido" });
+    const role = ["oficina", "fabrica", "admin"].includes(body.role) ? body.role : "oficina";
+    const user = { id: uid(), name: body.name.trim(), role, pin: String(body.pin || "1234") };
+    const updated = await persist((d) => { d.users.push(user); return d; });
+    return sendJSON(res, 200, updated.users);
+  }
+  if (pathname.match(/^\/api\/users\/[^/]+$/) && req.method === "PATCH") {
+    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    const id = pathname.split("/").pop();
+    const body = await readBody(req);
+    const updated = await persist((d) => { d.users = d.users.map((u) => (u.id === id ? { ...u, ...body, id: u.id } : u)); return d; });
+    return sendJSON(res, 200, updated.users);
+  }
+  if (pathname.match(/^\/api\/users\/[^/]+$/) && req.method === "DELETE") {
+    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    const id = pathname.split("/").pop();
+    if (id === "u_admin") return sendJSON(res, 400, { error: "No se puede borrar al administrador" });
+    const updated = await persist((d) => {
+      d.users = d.users.filter((u) => u.id !== id);
+      d.responsablesProyecto = d.responsablesProyecto.filter((x) => x !== id);
+      d.responsablesAuxiliar = d.responsablesAuxiliar.filter((x) => x !== id);
+      return d;
     });
-  };
+    return sendJSON(res, 200, updated.users);
+  }
+  if (pathname.match(/^\/api\/users\/[^/]+\/responsable-proyecto$/) && req.method === "PATCH") {
+    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    const id = pathname.split("/")[3];
+    const updated = await persist((d) => { d.responsablesProyecto = d.responsablesProyecto.includes(id) ? d.responsablesProyecto.filter((x) => x !== id) : [...d.responsablesProyecto, id]; return d; });
+    return sendJSON(res, 200, { responsablesProyecto: updated.responsablesProyecto });
+  }
+  if (pathname.match(/^\/api\/users\/[^/]+\/responsable-auxiliar$/) && req.method === "PATCH") {
+    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    const id = pathname.split("/")[3];
+    const updated = await persist((d) => { d.responsablesAuxiliar = d.responsablesAuxiliar.includes(id) ? d.responsablesAuxiliar.filter((x) => x !== id) : [...d.responsablesAuxiliar, id]; return d; });
+    return sendJSON(res, 200, { responsablesAuxiliar: updated.responsablesAuxiliar });
+  }
 
-  const exportarExcel = () => {
-    const wb = XLSX.utils.book_new();
-    const wsHorasDia = XLSX.utils.json_to_sheet(pivotHorasPorTrabajador());
-    XLSX.utils.book_append_sheet(wb, wsHorasDia, "Horas por trabajador y día");
-    const wsConcepto = XLSX.utils.json_to_sheet(pivotPorConcepto());
-    XLSX.utils.book_append_sheet(wb, wsConcepto, "Imputación por concepto");
-    const wsFichajes = XLSX.utils.json_to_sheet([...fichajes].sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1)).map((f) => ({ Usuario: f.userName, Fecha: f.date, Hora: f.time, Tipo: f.type + (f.automatico ? " (auto)" : ""), Ubicación: f.locationLabel || "" })));
-    XLSX.utils.book_append_sheet(wb, wsFichajes, "Fichajes");
-    XLSX.writeFile(wb, `informe_${desde}_a_${hasta}.xlsx`);
-  };
-  const enviarPorCorreo = () => {
-    const cuerpo = encodeURIComponent(`Informe de fichajes e imputaciones (${desde} a ${hasta})\n\nFichajes: ${fichajes.length}\nImputaciones: ${imputaciones.length}\n\nExporta primero a Excel y adjúntalo manualmente.`);
-    window.open(`mailto:?subject=${encodeURIComponent("Informe de fichajes e imputaciones")}&body=${cuerpo}`, "_blank");
-  };
-  const resumenPorUsuario = useMemo(() => {
-    const acc = {};
-    imputaciones.forEach((i) => {
-      if (!acc[i.userName]) acc[i.userName] = { normal: 0, excedente: 0 };
-      acc[i.userName][i.excedente ? "excedente" : "normal"] += i.hours;
-    });
-    return acc;
-  }, [imputaciones]);
+  // ---- Frases motivacionales (solo administrador) ----
+  if (pathname === "/api/frases" && req.method === "GET") {
+    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    return sendJSON(res, 200, (await loadData()).frases || []);
+  }
+  if (pathname === "/api/frases" && req.method === "POST") {
+    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    const body = await readBody(req);
+    if (!body.texto || !body.texto.trim()) return sendJSON(res, 400, { error: "Texto requerido" });
+    const item = { id: uid(), texto: body.texto.trim() };
+    const updated = await persist((d) => { d.frases = d.frases || []; d.frases.push(item); return d; });
+    return sendJSON(res, 200, updated.frases);
+  }
+  if (pathname.match(/^\/api\/frases\/[^/]+$/) && req.method === "DELETE") {
+    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    const id = pathname.split("/").pop();
+    const updated = await persist((d) => { d.frases = (d.frases || []).filter((f) => f.id !== id); return d; });
+    return sendJSON(res, 200, updated.frases);
+  }
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div className="card">
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <div><label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>Desde</label><input type="date" className="input mono" style={{ marginTop: 4 }} value={desde} onChange={(e) => setDesde(e.target.value)} /></div>
-          <div><label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>Hasta</label><input type="date" className="input mono" style={{ marginTop: 4 }} value={hasta} onChange={(e) => setHasta(e.target.value)} /></div>
-          <button className="btn btn-primary" onClick={exportarExcel} disabled={cargando}><Download size={14} /> Exportar a Excel</button>
-          <button className="btn btn-ghost" onClick={enviarPorCorreo}><Mail size={14} /> Enviar por correo</button>
-        </div>
-      </div>
-      <div className="card">
-        <h3 style={{ fontSize: 14, marginBottom: 10 }}>Horas por trabajador (periodo)</h3>
-        <div className="table-wrap"><table><thead><tr><th>Trabajador</th><th>Normales</th><th>Excedentes</th><th>Total</th></tr></thead><tbody>
-          {Object.entries(resumenPorUsuario).map(([name, h]) => <tr key={name}><td>{name}</td><td className="mono">{h.normal}h</td><td className="mono" style={{ color: h.excedente > 0 ? "var(--accent-ink)" : undefined }}>{h.excedente}h</td><td className="mono" style={{ fontWeight: 700 }}>{Math.round((h.normal + h.excedente) * 100) / 100}h</td></tr>)}
-          {Object.keys(resumenPorUsuario).length === 0 && <tr><td colSpan={4} style={{ textAlign: "center", color: "var(--muted)", padding: 16 }}>Sin datos en el periodo.</td></tr>}
-        </tbody></table></div>
-      </div>
-      <div className="card">
-        <h3 style={{ fontSize: 14, marginBottom: 10 }}>Fichajes del periodo ({fichajes.length})</h3>
-        <div className="table-wrap scrollbar" style={{ maxHeight: 320, overflowY: "auto" }}>
-          <table><thead><tr><th>Usuario</th><th>Fecha</th><th>Hora</th><th>Tipo</th><th>Ubicación</th></tr></thead><tbody>
-            {[...fichajes].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1)).map((f) => (
-              <tr key={f.id}><td>{f.userName}</td><td className="mono">{f.date}</td><td className="mono">{f.time}</td>
-              <td><span className="pill" style={{ background: f.type === "entrada" ? "#E7F3EC" : "#FBEAEA", color: f.type === "entrada" ? "var(--ok)" : "var(--warn)" }}>{f.type}{f.automatico ? " · auto" : ""}</span></td>
-              <td><UbicacionCelda f={f} /></td></tr>
-            ))}
-          </tbody></table>
-        </div>
-      </div>
-    </div>
-  );
+  // ---- Fichajes ----
+  if (pathname === "/api/fichajes" && req.method === "POST") {
+    const data = await loadData();
+    const me = data.users.find((u) => u.id === session.userId);
+    const body = await readBody(req);
+    const now = new Date();
+    const { date: hoyMadrid, time: horaMadrid } = madridParts(now);
+    const record = {
+      id: uid(), userId: session.userId, userName: me ? me.name : "—",
+      type: body.type === "salida" ? "salida" : "entrada",
+      date: hoyMadrid, time: horaMadrid,
+      timestamp: now.toISOString(),
+      lat: typeof body.lat === "number" ? body.lat : null,
+      lng: typeof body.lng === "number" ? body.lng : null,
+      accuracy: typeof body.accuracy === "number" ? body.accuracy : null,
+      locationLabel: body.locationLabel || null,
+    };
+    await persist((d) => { d.fichajes.push(record); return d; });
+    return sendJSON(res, 200, record);
+  }
+  if (pathname === "/api/fichajes" && req.method === "GET") {
+    const data = await loadData();
+    let rows = isAdmin(session) ? data.fichajes : data.fichajes.filter((f) => f.userId === session.userId);
+    if (query.get("desde")) rows = rows.filter((f) => f.date >= query.get("desde"));
+    if (query.get("hasta")) rows = rows.filter((f) => f.date <= query.get("hasta"));
+    return sendJSON(res, 200, rows);
+  }
+
+  // ---- Imputaciones ----
+  if (pathname === "/api/imputaciones" && req.method === "GET") {
+    const data = await loadData();
+    const date = query.get("date");
+    let rows = data.imputaciones.filter((i) => i.userId === session.userId);
+    if (date) rows = rows.filter((i) => i.date === date);
+    else rows = rows.sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 30);
+    return sendJSON(res, 200, rows);
+  }
+  if (pathname === "/api/imputaciones/day" && req.method === "PUT") {
+    const body = await readBody(req);
+    if (!body.date) return sendJSON(res, 400, { error: "Fecha requerida" });
+    const cap = dailyCap(body.date);
+    const data = await loadData();
+    const me = data.users.find((u) => u.id === session.userId);
+    const entries = Array.isArray(body.entries) ? body.entries.filter((e) => e.projectId && parseFloat(e.hours) > 0) : [];
+    const principal = entries.filter((e) => !e.excedente);
+    const totalPrincipal = principal.reduce((s, e) => s + parseFloat(e.hours), 0);
+    if (totalPrincipal > cap + 0.001) {
+      return sendJSON(res, 400, { error: `Las horas de la jornada principal no pueden superar ${cap}h ese día. El resto va en "Horas excedentes".` });
+    }
+    const nuevas = entries.map((e) => ({
+      id: uid(), userId: session.userId, userName: me ? me.name : "—", date: body.date,
+      projectId: e.projectId, projectName: e.projectName || "—", hours: parseFloat(e.hours), excedente: !!e.excedente,
+    }));
+    await persist((d) => { d.imputaciones = d.imputaciones.filter((i) => !(i.userId === session.userId && i.date === body.date)); d.imputaciones.push(...nuevas); return d; });
+    return sendJSON(res, 200, nuevas);
+  }
+  if (pathname === "/api/imputaciones/report" && req.method === "GET") {
+    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    const data = await loadData();
+    let rows = data.imputaciones;
+    if (query.get("desde")) rows = rows.filter((i) => i.date >= query.get("desde"));
+    if (query.get("hasta")) rows = rows.filter((i) => i.date <= query.get("hasta"));
+    return sendJSON(res, 200, rows);
+  }
+
+  // ---- Calendario ----
+  if (pathname === "/api/events" && req.method === "GET") {
+    const data = await loadData();
+    const visibles = isAdmin(session) ? data.events : data.events.filter((e) => e.invitados === "todos" || (Array.isArray(e.invitados) && e.invitados.includes(session.userId)));
+    return sendJSON(res, 200, visibles);
+  }
+  if (pathname === "/api/events" && req.method === "POST") {
+    const data = await loadData();
+    if (!puedeGestionarEventos(data, session)) return sendJSON(res, 403, { error: "No autorizado a crear eventos" });
+    const body = await readBody(req);
+    if (!body.date || !body.type) return sendJSON(res, 400, { error: "Fecha y tipo requeridos" });
+    const ev = {
+      id: uid(), date: body.date, type: body.type, title: body.title || "",
+      time: body.time || null, description: body.description || "", location: body.location || "",
+      invitados: body.invitados === "todos" || !Array.isArray(body.invitados) ? "todos" : body.invitados,
+      alerta: body.alerta && typeof body.alerta === "object" ? { activa: !!body.alerta.activa, minutosAntes: Number(body.alerta.minutosAntes) || 60 } : { activa: false, minutosAntes: 60 },
+      festivoScope: body.festivoScope || "nacional",
+      festivoLugar: body.festivoLugar || "",
+    };
+    const updated = await persist((d) => { d.events.push(ev); return d; });
+    return sendJSON(res, 200, updated.events);
+  }
+  if (pathname.match(/^\/api\/events\/[^/]+$/) && req.method === "DELETE") {
+    const data = await loadData();
+    if (!puedeGestionarEventos(data, session)) return sendJSON(res, 403, { error: "No autorizado a borrar eventos" });
+    const id = pathname.split("/").pop();
+    const updated = await persist((d) => { d.events = d.events.filter((e) => e.id !== id); return d; });
+    return sendJSON(res, 200, updated.events);
+  }
+
+  return sendJSON(res, 404, { error: "Ruta no encontrada" });
 }
 
-function GestionUsuarios({ api, refreshConfig, showToast }) {
-  const [usuarios, setUsuarios] = useState([]);
-  const [respProy, setRespProy] = useState([]);
-  const [respAux, setRespAux] = useState([]);
-  const [nombre, setNombre] = useState("");
-  const [role, setRole] = useState("oficina");
-  const [pin, setPin] = useState("1234");
+// -----------------------------------------------------------------
+// Servidor
+// -----------------------------------------------------------------
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const pathname = url.pathname;
+  if (pathname.startsWith("/api/")) {
+    try { await handleApi(req, res, pathname, url.searchParams); }
+    catch (e) { console.error(e); sendJSON(res, 500, { error: "Error interno del servidor" }); }
+    return;
+  }
+  serveStatic(req, res, pathname);
+});
 
-  const cargar = useCallback(() => {
-    api("GET", "/api/users").then(setUsuarios).catch(() => {});
-    api("GET", "/api/config").then((c) => { setRespProy(c.responsablesProyecto); setRespAux(c.responsablesAuxiliar); }).catch(() => {});
-  }, [api]);
-  useEffect(() => { cargar(); }, [cargar]);
+server.listen(PORT, () => {
+  console.log(`ONKA escuchando en http://localhost:${PORT}`);
+  if (USING_REDIS) {
+    console.log(`Almacenamiento: Upstash (${REDIS_URL}) — token de ${REDIS_TOKEN.length} caracteres, empieza por "${REDIS_TOKEN.slice(0, 4)}..."`);
+  } else {
+    console.log("Almacenamiento: archivo local (data/data.json) — Upstash NO detectado. Revisa las variables de entorno UPSTASH_REDIS_REST_URL y UPSTASH_REDIS_REST_TOKEN si esto es producción.");
+  }
+});
 
-  const addUser = async () => { if (!nombre.trim()) return; await api("POST", "/api/users", { name: nombre.trim(), role, pin }); setNombre(""); cargar(); refreshConfig(); showToast("Trabajador añadido."); };
-  const delUser = async (id) => { await api("DELETE", "/api/users/" + id); cargar(); refreshConfig(); };
-  const toggleRespProy = async (id) => { await api("PATCH", `/api/users/${id}/responsable-proyecto`); cargar(); refreshConfig(); };
-  const toggleRespAux = async (id) => { await api("PATCH", `/api/users/${id}/responsable-auxiliar`); cargar(); refreshConfig(); };
-
-  const roleLabels = { admin: "Administrador", oficina: "Oficina", fabrica: "Fábrica" };
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div className="card">
-        <h3 style={{ fontSize: 14, marginBottom: 10 }}>Nuevo trabajador</h3>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <input className="input" style={{ flex: 2, minWidth: 160 }} placeholder="Nombre" value={nombre} onChange={(e) => setNombre(e.target.value)} />
-          <select className="input" style={{ flex: 1, minWidth: 160 }} value={role} onChange={(e) => setRole(e.target.value)}>
-            <option value="oficina">Oficina</option>
-            <option value="fabrica">Fábrica</option>
-            <option value="admin">Administrador</option>
-          </select>
-          <input className="input mono" style={{ width: 90 }} placeholder="PIN" value={pin} onChange={(e) => setPin(e.target.value)} />
-          <button className="btn btn-primary" onClick={addUser}><Plus size={14} /> Añadir</button>
-        </div>
-      </div>
-      <div className="card">
-        <h3 style={{ fontSize: 14, marginBottom: 10 }}>Trabajadores</h3>
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>Nombre</th><th>Rol</th><th>PIN</th><th>Resp. proyectos</th><th>Resp. auxiliares</th><th></th></tr></thead>
-            <tbody>
-              {usuarios.map((u) => (
-                <tr key={u.id}>
-                  <td>{u.name}</td><td>{roleLabels[u.role]}</td><td className="mono">{u.pin}</td>
-                  <td>{u.role !== "admin" && <button className={`btn btn-sm ${respProy.includes(u.id) ? "btn-accent" : "btn-ghost"}`} onClick={() => toggleRespProy(u.id)}><ShieldCheck size={13} /> {respProy.includes(u.id) ? "Sí" : "No"}</button>}</td>
-                  <td>{u.role !== "admin" && <button className={`btn btn-sm ${respAux.includes(u.id) ? "btn-accent" : "btn-ghost"}`} onClick={() => toggleRespAux(u.id)}><ShieldCheck size={13} /> {respAux.includes(u.id) ? "Sí" : "No"}</button>}</td>
-                  <td>{u.role !== "admin" && <button className="btn btn-danger btn-sm" onClick={() => delUser(u.id)}><Trash2 size={13} /></button>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 10 }}>"Resp. proyectos" y "Resp. auxiliares" dan permiso para crear/gestionar conceptos en esa familia, sin ser administrador. Comunica el PIN a cada trabajador para que entre desde su móvil.</div>
-      </div>
-    </div>
-  );
-}
-
-function GestionFamilia({ api, config, refreshConfig, showToast, familia }) {
-  const esProyectos = familia === "proyectos";
-  const itemsRaw = esProyectos ? (config?.projects || []) : (config?.auxTasks || []);
-  const items = [...itemsRaw].sort((a, b) => (a.fixed === b.fixed ? 0 : a.fixed ? 1 : -1));
-  const basePath = esProyectos ? "/api/projects" : "/api/aux-tasks";
-  const [nombre, setNombre] = useState("");
-  const [editandoId, setEditandoId] = useState(null);
-  const [nombreEdit, setNombreEdit] = useState("");
-
-  const addItem = async () => {
-    if (!nombre.trim()) return;
-    try { await api("POST", basePath, { name: nombre.trim(), fixed: false }); setNombre(""); refreshConfig(); showToast("Añadido."); }
-    catch (e) { showToast(e.message); }
-  };
-  const delItem = async (id) => { try { await api("DELETE", `${basePath}/${id}`); refreshConfig(); } catch (e) { showToast(e.message); } };
-  const empezarEdicion = (it) => { setEditandoId(it.id); setNombreEdit(it.name); };
-  const guardarEdicion = async (id) => {
-    if (!nombreEdit.trim()) return;
-    try { await api("PATCH", `${basePath}/${id}`, { name: nombreEdit.trim() }); setEditandoId(null); refreshConfig(); showToast("Actualizado."); }
-    catch (e) { showToast(e.message); }
-  };
-
-  return (
-    <div className="card">
-      <h3 style={{ fontSize: 14, marginBottom: 4 }}>{esProyectos ? "Proyectos — Oficina y Fábrica" : "Trabajos auxiliares — Solo Fábrica"}</h3>
-      <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 0, marginBottom: 12 }}>
-        {esProyectos ? "Visible en la imputación de horas de oficina y fábrica." : "Visible solo en la imputación de horas de los trabajadores de fábrica."} Los que aparecen <em>en cursiva</em> son los habituales de siempre — puedes cambiarles el nombre, pero no borrarlos.
-      </p>
-      <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
-        <input className="input" style={{ flex: 1, minWidth: 180 }} placeholder="Nombre del nuevo proyecto o trabajo" value={nombre} onChange={(e) => setNombre(e.target.value)} />
-        <button className="btn btn-primary" onClick={addItem}><Plus size={14} /> Añadir</button>
-      </div>
-      <div className="table-wrap"><table><thead><tr><th>Nombre</th><th></th></tr></thead><tbody>
-        {items.map((it) => (
-          <tr key={it.id}>
-            {editandoId === it.id ? (
-              <td colSpan={2}>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <input className="input" style={{ flex: 1 }} value={nombreEdit} onChange={(e) => setNombreEdit(e.target.value)} autoFocus />
-                  <button className="btn btn-primary btn-sm" onClick={() => guardarEdicion(it.id)}><Check size={13} /></button>
-                  <button className="btn btn-ghost btn-sm" onClick={() => setEditandoId(null)}><X size={13} /></button>
-                </div>
-              </td>
-            ) : (
-              <>
-                <td style={it.fixed ? estiloOpcionFija : undefined}>{it.name}</td>
-                <td style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                  <button className="btn btn-ghost btn-sm" onClick={() => empezarEdicion(it)} title="Editar nombre"><Settings size={13} /></button>
-                  <button className="btn btn-danger btn-sm" onClick={() => delItem(it.id)} disabled={it.fixed} title={it.fixed ? "Concepto habitual — no se puede eliminar" : ""}><Trash2 size={13} /></button>
-                </td>
-              </>
-            )}
-          </tr>
-        ))}
-      </tbody></table></div>
-    </div>
-  );
-}
-
-function GestionFrases({ api, showToast }) {
-  const [frases, setFrases] = useState([]);
-  const [texto, setTexto] = useState("");
-
-  const cargar = useCallback(() => { api("GET", "/api/frases").then(setFrases).catch(() => {}); }, [api]);
-  useEffect(() => { cargar(); }, [cargar]);
-
-  const dias = Math.floor(Date.now() / 86400000);
-  const idxActual = frases.length ? Math.floor(dias / 14) % frases.length : -1;
-
-  const addFrase = async () => {
-    if (!texto.trim()) return;
-    try { await api("POST", "/api/frases", { texto: texto.trim() }); setTexto(""); cargar(); showToast("Frase añadida."); }
-    catch (e) { showToast(e.message); }
-  };
-  const delFrase = async (id) => { try { await api("DELETE", "/api/frases/" + id); cargar(); } catch (e) { showToast(e.message); } };
-
-  return (
-    <div className="card">
-      <h3 style={{ fontSize: 14, marginBottom: 4 }}>Frase motivacional del login</h3>
-      <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 0, marginBottom: 12 }}>
-        Se muestra en la pantalla de usuario/contraseña, a todos los trabajadores. Si añades varias, se van turnando automáticamente cada 14 días — la marcada como "En uso ahora" es la que se ve hoy.
-      </p>
-      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-        <input className="input" style={{ flex: 1, minWidth: 220 }} placeholder="Escribe una frase motivacional…" value={texto} onChange={(e) => setTexto(e.target.value)} />
-        <button className="btn btn-primary" onClick={addFrase}><Plus size={14} /> Añadir</button>
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {frases.map((f, i) => (
-          <div key={f.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, border: "1px solid var(--line)", borderRadius: 8, padding: "8px 10px", background: i === idxActual ? "#F2E7D5" : "#fff" }}>
-            <span style={{ fontSize: 13.5, fontStyle: "italic" }}>"{f.texto}"{i === idxActual && <span className="pill pill-admin" style={{ marginLeft: 8 }}>En uso ahora</span>}</span>
-            <button className="btn btn-danger btn-sm" onClick={() => delFrase(f.id)}><Trash2 size={13} /></button>
-          </div>
-        ))}
-        {frases.length === 0 && <div style={{ color: "var(--muted)", fontSize: 13 }}>Todavía no hay ninguna frase — añade la primera arriba.</div>}
-      </div>
-    </div>
-  );
-}
-
-/* =================================================================
-   ICONOS
-================================================================= */
-function Icon({ size = 16, color = "currentColor", style, children, ...rest }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style} {...rest}>{children}</svg>;
-}
-const Clock = (p) => <Icon {...p}><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></Icon>;
-const MapPin = (p) => <Icon {...p}><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></Icon>;
-const CalIcon = (p) => <Icon {...p}><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></Icon>;
-const FolderKanban = (p) => <Icon {...p}><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" /><line x1="8" y1="10" x2="8" y2="16" /><line x1="12" y1="10" x2="12" y2="14" /><line x1="16" y1="10" x2="16" y2="16" /></Icon>;
-const Users = (p) => <Icon {...p}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></Icon>;
-const Settings = (p) => <Icon {...p}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" /></Icon>;
-const Download = (p) => <Icon {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></Icon>;
-const AlertTriangle = (p) => <Icon {...p}><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></Icon>;
-const Check = (p) => <Icon {...p}><polyline points="20 6 9 17 4 12" /></Icon>;
-const X = (p) => <Icon {...p}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></Icon>;
-const Plus = (p) => <Icon {...p}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></Icon>;
-const Trash2 = (p) => <Icon {...p}><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></Icon>;
-const LogOut = (p) => <Icon {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></Icon>;
-const ChevronLeft = (p) => <Icon {...p}><polyline points="15 18 9 12 15 6" /></Icon>;
-const ChevronRight = (p) => <Icon {...p}><polyline points="9 18 15 12 9 6" /></Icon>;
-const Mail = (p) => <Icon {...p}><rect x="2" y="4" width="20" height="16" rx="2" /><path d="m22 6-10 7L2 6" /></Icon>;
-const ShieldCheck = (p) => <Icon {...p}><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /><path d="m9 12 2 2 4-4" /></Icon>;
-const Cog = (p) => <Icon {...p}><circle cx="12" cy="12" r="5" /><line x1="20" y1="12" x2="22.5" y2="12" /><line x1="17.7" y1="17.7" x2="19.6" y2="19.6" /><line x1="12" y1="20" x2="12" y2="22.5" /><line x1="6.3" y1="17.7" x2="4.4" y2="19.6" /><line x1="4" y1="12" x2="1.5" y2="12" /><line x1="6.3" y1="6.3" x2="4.4" y2="4.4" /><line x1="12" y1="4" x2="12" y2="1.5" /><line x1="17.7" y1="6.3" x2="19.6" y2="4.4" /></Icon>;
-const Briefcase = (p) => <Icon {...p}><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></Icon>;
-const BellRing = (p) => <Icon {...p}><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /><path d="M4 2C2.8 3 2 4.5 2 6" /><path d="M22 6c0-1.5-.8-3-2-4" /></Icon>;
-
-const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(<ErrorBoundary><App /></ErrorBoundary>);
-</script>
-</body>
-</html>
+// Mientras el servidor esté despierto, revisa cada 5 minutos si hay fichajes
+// de entrada sin salida que ya deban cerrarse automáticamente (a partir de
+// las 20:00 de Madrid). Si el servidor estuvo dormido a esa hora exacta, la
+// comprobación dentro de loadData() lo aplica igualmente en cuanto alguien
+// vuelve a usar la app — esto solo lo adelanta mientras hay actividad.
+setInterval(() => { loadData().catch((e) => console.error("Error en comprobación periódica:", e.message)); }, 5 * 60 * 1000);
