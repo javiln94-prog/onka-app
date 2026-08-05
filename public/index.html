@@ -498,7 +498,7 @@ function Fichaje({ api, user, misFichajes, refresh, showToast }) {
                 {sorted.slice(0, 30).map((f) => (
                   <tr key={f.id}>
                     <td className="mono">{f.date}</td><td className="mono">{f.time}</td>
-                    <td><span className="pill" style={{ background: f.type === "entrada" ? "#E7F3EC" : "#FBEAEA", color: f.type === "entrada" ? "var(--ok)" : "var(--warn)" }}>{f.type}</span></td>
+                    <td><span className="pill" style={{ background: f.type === "entrada" ? "#E7F3EC" : "#FBEAEA", color: f.type === "entrada" ? "var(--ok)" : "var(--warn)" }}>{f.type}{f.automatico ? " · auto" : ""}</span></td>
                     <td style={{ maxWidth: 260 }}><UbicacionCelda f={f} /></td>
                   </tr>
                 ))}
@@ -521,7 +521,7 @@ function Fichaje({ api, user, misFichajes, refresh, showToast }) {
 }
 
 function UbicacionCelda({ f }) {
-  if (f.lat == null) return <span style={{ color: "var(--muted)" }}>Sin ubicación</span>;
+  if (f.lat == null) return <span style={{ color: f.automatico ? "var(--warn)" : "var(--muted)" }}>{f.locationLabel || "Sin ubicación"}</span>;
   const mapsUrl = `https://www.google.com/maps?q=${f.lat},${f.lng}`;
   return <a href={mapsUrl} target="_blank" rel="noreferrer" style={{ color: "var(--ink)", textDecoration: "underline", fontSize: 12.5 }}>{f.locationLabel ? f.locationLabel.split(",").slice(0, 3).join(",") : `${f.lat.toFixed(4)}, ${f.lng.toFixed(4)}`}</a>;
 }
@@ -1086,7 +1086,7 @@ function Informes({ api }) {
           <table><thead><tr><th>Usuario</th><th>Fecha</th><th>Hora</th><th>Tipo</th><th>Ubicación</th></tr></thead><tbody>
             {[...fichajes].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1)).map((f) => (
               <tr key={f.id}><td>{f.userName}</td><td className="mono">{f.date}</td><td className="mono">{f.time}</td>
-              <td><span className="pill" style={{ background: f.type === "entrada" ? "#E7F3EC" : "#FBEAEA", color: f.type === "entrada" ? "var(--ok)" : "var(--warn)" }}>{f.type}</span></td>
+              <td><span className="pill" style={{ background: f.type === "entrada" ? "#E7F3EC" : "#FBEAEA", color: f.type === "entrada" ? "var(--ok)" : "var(--warn)" }}>{f.type}{f.automatico ? " · auto" : ""}</span></td>
               <td><UbicacionCelda f={f} /></td></tr>
             ))}
           </tbody></table>
