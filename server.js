@@ -42,13 +42,18 @@ function seedData() {
   return {
     users: [{ id: "u_admin", name: "Administrador", role: "admin", pin: "0000" }],
     projects: [
+      { id: uid(), name: "Mantenimiento maquinaria", fixed: true },
       { id: uid(), name: "Captación de clientes", fixed: true },
-      { id: uid(), name: "Mantenimiento", fixed: true },
+      { id: uid(), name: "Reunión proveedores", fixed: true },
       { id: uid(), name: "Administración", fixed: true },
       { id: uid(), name: "Baja médica", fixed: true },
       { id: uid(), name: "Asuntos propios", fixed: true },
     ],
-    auxTasks: [],
+    auxTasks: [
+      { id: uid(), name: "Preparación pedidos PLV", fixed: true },
+      { id: uid(), name: "Mantenimiento maquinaria", fixed: true },
+      { id: uid(), name: "Carga descarga no pedidos", fixed: true },
+    ],
     fichajes: [],
     imputaciones: [],
     events: [],
@@ -68,8 +73,12 @@ function migrate(data) {
     alerta: { activa: false, minutosAntes: 60 }, festivoScope: "nacional", festivoLugar: "",
     ...e,
   }));
-  ["Baja médica", "Asuntos propios"].forEach((nombre) => {
+  ["Baja médica", "Asuntos propios", "Mantenimiento maquinaria", "Captación de clientes", "Reunión proveedores", "Administración"].forEach((nombre) => {
     if (!data.projects.some((p) => p.name === nombre)) data.projects.push({ id: uid(), name: nombre, fixed: true });
+  });
+  data.auxTasks = data.auxTasks || [];
+  ["Preparación pedidos PLV", "Mantenimiento maquinaria", "Carga descarga no pedidos"].forEach((nombre) => {
+    if (!data.auxTasks.some((t) => t.name === nombre)) data.auxTasks.push({ id: uid(), name: nombre, fixed: true });
   });
   return data;
 }
@@ -190,6 +199,9 @@ async function auth(req) {
   return { token, ...session };
 }
 function isAdmin(session) { return !!session && session.role === "admin"; }
+function puedeGestionarEventos(data, session) {
+  return isAdmin(session) || data.responsablesProyecto.includes(session.userId) || data.responsablesAuxiliar.includes(session.userId);
+}
 
 // El servidor puede estar corriendo en UTC (p. ej. en Render). Calculamos
 // siempre la fecha/hora en el huso horario de España, con cambio de hora
@@ -452,7 +464,8 @@ async function handleApi(req, res, pathname, query) {
   // ---- Calendario ----
   if (pathname === "/api/events" && req.method === "GET") return sendJSON(res, 200, (await loadData()).events);
   if (pathname === "/api/events" && req.method === "POST") {
-    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    const data = await loadData();
+    if (!puedeGestionarEventos(data, session)) return sendJSON(res, 403, { error: "No autorizado a crear eventos" });
     const body = await readBody(req);
     if (!body.date || !body.type) return sendJSON(res, 400, { error: "Fecha y tipo requeridos" });
     const ev = {
@@ -467,7 +480,8 @@ async function handleApi(req, res, pathname, query) {
     return sendJSON(res, 200, updated.events);
   }
   if (pathname.match(/^\/api\/events\/[^/]+$/) && req.method === "DELETE") {
-    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    const data = await loadData();
+    if (!puedeGestionarEventos(data, session)) return sendJSON(res, 403, { error: "No autorizado a borrar eventos" });
     const id = pathname.split("/").pop();
     const updated = await persist((d) => { d.events = d.events.filter((e) => e.id !== id); return d; });
     return sendJSON(res, 200, updated.events);
@@ -498,4 +512,3 @@ server.listen(PORT, () => {
     console.log("Almacenamiento: archivo local (data/data.json) — Upstash NO detectado. Revisa las variables de entorno UPSTASH_REDIS_REST_URL y UPSTASH_REDIS_REST_TOKEN si esto es producción.");
   }
 });
-
