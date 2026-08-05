@@ -581,6 +581,21 @@ function ImputacionHoras({ api, user, config, showToast }) {
   const familiaDe = (projectId) => (idsAuxiliares.has(projectId) ? "auxiliar" : "proyectos");
   const resolverNombre = (family, id) => (family === "auxiliar" ? auxiliares : proyectos).find((o) => o.id === id)?.name || "—";
 
+  // Conceptos usados más recientemente por este trabajador, para el modo rápido
+  const recientesDe = (lista, idsSet) => {
+    const vistos = [];
+    for (const h of historial) {
+      if (!idsSet.has(h.projectId) || vistos.includes(h.projectId)) continue;
+      vistos.push(h.projectId);
+      if (vistos.length >= 3) break;
+    }
+    const items = vistos.map((id) => lista.find((o) => o.id === id)).filter(Boolean);
+    return items.length ? items : lista.slice(0, 3);
+  };
+  const idsProyectos = useMemo(() => new Set(proyectos.map((p) => p.id)), [proyectos]);
+  const recientesProyectos = useMemo(() => recientesDe(proyectos, idsProyectos), [historial, proyectos, idsProyectos]); // eslint-disable-line
+  const recientesAuxiliares = useMemo(() => recientesDe(auxiliares, idsAuxiliares), [historial, auxiliares, idsAuxiliares]); // eslint-disable-line
+
   const nuevaFila = (family) => ({ id: "n" + Math.random(), family, projectId: (family === "auxiliar" ? auxiliares : proyectos)[0]?.id || "", hours: "" });
 
   const cargarDia = useCallback((f) => {
@@ -633,6 +648,7 @@ function ImputacionHoras({ api, user, config, showToast }) {
   const cambiarFamiliaExc = cambiarFamiliaFila(setExcedentes);
 
   const guardar = async () => {
+    if (fecha > todayISO()) { showToast("No se pueden imputar horas en días futuros."); return; }
     if (!estadoEspecial && excedeCap) { showToast(`Las horas de la jornada principal no pueden superar ${cap}h. Usa "Horas excedentes" para el resto.`); return; }
     let entriesPrincipales;
     if (estadoEspecial) {
@@ -663,7 +679,7 @@ function ImputacionHoras({ api, user, config, showToast }) {
             <h3 style={{ fontSize: 15 }}>Imputar horas del día</h3>
             <div style={{ fontSize: 12, color: "var(--muted)" }}>{roleTag} · máximo jornada principal: <strong>{cap}h</strong></div>
           </div>
-          <input type="date" className="input mono" style={{ width: 170 }} value={fecha} onChange={(e) => setFecha(e.target.value)} />
+          <input type="date" className="input mono" style={{ width: 170 }} value={fecha} max={todayISO()} onChange={(e) => setFecha(e.target.value > todayISO() ? todayISO() : e.target.value)} />
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "14px 0" }}>
@@ -692,12 +708,12 @@ function ImputacionHoras({ api, user, config, showToast }) {
             <div style={{ display: "flex", flexDirection: "column", gap: 6, margin: "14px 0" }}>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 <span style={{ fontSize: 12, color: "var(--muted)" }}>📁 Jornada completa en Proyectos ({cap}h):</span>
-                {proyectos.slice(0, 4).map((o) => <button key={o.id} className="btn btn-ghost btn-sm" onClick={() => quickFill("proyectos", o.id)}>{o.name}</button>)}
+                {recientesProyectos.map((o) => <button key={o.id} className="btn btn-ghost btn-sm" onClick={() => quickFill("proyectos", o.id)}>{o.name}</button>)}
               </div>
               {esFabrica && (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   <span style={{ fontSize: 12, color: "var(--muted)" }}>🔧 Jornada completa en Auxiliar ({cap}h):</span>
-                  {auxiliares.slice(0, 4).map((o) => <button key={o.id} className="btn btn-ghost btn-sm" onClick={() => quickFill("auxiliar", o.id)}>{o.name}</button>)}
+                  {recientesAuxiliares.map((o) => <button key={o.id} className="btn btn-ghost btn-sm" onClick={() => quickFill("auxiliar", o.id)}>{o.name}</button>)}
                 </div>
               )}
             </div>
@@ -788,10 +804,15 @@ function Calendario({ api, user, events, refreshEvents, config }) {
   const [diaSel, setDiaSel] = useState(null);
   const puedeGestionar = user.role === "admin" || (config && (config.responsablesProyecto.includes(user.id) || config.responsablesAuxiliar.includes(user.id)));
   const year = cursor.getFullYear(); const month = cursor.getMonth();
-  const firstDay = new Date(year, month, 1);
-  const startOffset = (firstDay.getDay() + 6) % 7;
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const cells = []; for (let i = 0; i < startOffset; i++) cells.push(null); for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  const weekdayOf = (day) => (new Date(year, month, day).getDay() + 6) % 7; // 0=lunes ... 6=domingo
+  const diasLaborables = [];
+  for (let d = 1; d <= daysInMonth; d++) { const wd = weekdayOf(d); if (wd <= 4) diasLaborables.push({ day: d, wd }); }
+  const cells = [];
+  if (diasLaborables.length) {
+    for (let i = 0; i < diasLaborables[0].wd; i++) cells.push(null);
+    diasLaborables.forEach(({ day }) => cells.push(day));
+  }
   const eventosDe = (iso) => events.filter((e) => e.date === iso);
 
   return (
@@ -802,24 +823,24 @@ function Calendario({ api, user, events, refreshEvents, config }) {
           <h3 style={{ fontSize: 16 }}>{MESES[month]} {year}</h3>
           <button className="btn btn-ghost btn-sm" onClick={() => setCursor(new Date(year, month + 1, 1))}><ChevronRight size={14} /></button>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4, fontSize: 11, color: "var(--muted)", marginBottom: 4, textTransform: "uppercase", fontWeight: 700 }}>
-          {["L", "M", "X", "J", "V", "S", "D"].map((d) => <div key={d} style={{ textAlign: "center" }}>{d}</div>)}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 4, fontSize: 11, color: "var(--muted)", marginBottom: 4, textTransform: "uppercase", fontWeight: 700 }}>
+          {["L", "M", "X", "J", "V"].map((d) => <div key={d} style={{ textAlign: "center" }}>{d}</div>)}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4, gridAutoRows: "1fr" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 4, gridAutoRows: "1fr" }}>
           {cells.map((d, idx) => {
             if (d === null) return <div key={idx} />;
             const iso = `${year}-${pad(month + 1)}-${pad(d)}`;
-            const evs = eventosDe(iso); const finde = isWeekend(iso); const esHoy = iso === todayISO();
+            const evs = eventosDe(iso); const esHoy = iso === todayISO();
             const diaCompletoEv = evs.find((e) => e.type === "vacaciones") || evs.find((e) => e.type === "festivo" && (e.festivoScope === "nacional" || e.festivoScope === "autonomico"));
             const colorFondo = diaCompletoEv ? colorDeEvento(diaCompletoEv) : null;
             const tagsLinea = evs.filter((e) => e !== diaCompletoEv);
             const visibles = tagsLinea.slice(0, 2); const resto = tagsLinea.length - visibles.length;
             return (
-              <div key={idx} className="cal-cell" onClick={() => setDiaSel(iso)} style={{ border: esHoy ? "2px solid var(--primary)" : "1px solid var(--line)", background: colorFondo ? colorFondo + "30" : (finde ? "#FAFAF8" : "#fff") }}>
-                <div className="mono" style={{ fontSize: 11, color: finde && !colorFondo ? "var(--muted)" : "var(--ink)", fontWeight: colorFondo ? 700 : 400 }}>{d}</div>
-                {diaCompletoEv && diaCompletoEv.type === "festivo" && (
+              <div key={idx} className="cal-cell" onClick={() => setDiaSel(iso)} style={{ border: esHoy ? "2px solid var(--primary)" : "1px solid var(--line)", background: colorFondo ? colorFondo + "30" : "#fff" }}>
+                <div className="mono" style={{ fontSize: 11, color: "var(--ink)", fontWeight: colorFondo ? 700 : 400 }}>{d}</div>
+                {diaCompletoEv && (
                   <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", fontSize: 9, fontWeight: 700, color: colorFondo, lineHeight: 1.15, padding: "0 2px", overflow: "hidden" }}>
-                    {diaCompletoEv.title || TIPO_EVENTO.festivo.label}
+                    {diaCompletoEv.title || TIPO_EVENTO[diaCompletoEv.type].label}
                   </div>
                 )}
                 {visibles.map((e) => <div key={e.id} className="cal-tag" style={{ background: colorDeEvento(e) + "22", color: colorDeEvento(e) }}>{e.time ? e.time + " " : ""}{e.title || TIPO_EVENTO[e.type].label}</div>)}
@@ -1109,22 +1130,33 @@ function Informes({ api }) {
   // Por cada trabajador y día: hora del primer fichaje, hora del último, y las
   // horas resultantes. "Horas totales trabajadas" resta siempre 30 min (almuerzo)
   // y, de lunes a jueves, resta también 1h más (la comida de mediodía).
+  const formatoHMS = (ms) => {
+    if (ms == null || ms < 0) ms = 0;
+    const totalSeg = Math.round(ms / 1000);
+    const h = Math.floor(totalSeg / 3600);
+    const m = Math.floor((totalSeg % 3600) / 60);
+    const s = totalSeg % 60;
+    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  };
+
   const horasPorFichajes = useMemo(() => {
     const porClave = {};
     fichajes.forEach((f) => { const k = f.userId + "|" + f.date; (porClave[k] = porClave[k] || []).push(f); });
-    const resultado = {}; // clave "userId|date" -> { horasTotales, horasTrabajadas, idUltimo }
+    const resultado = {}; // clave "userId|date" -> { msTotal, msTrabajado, horasTrabajadasDecimal, idUltimo }
     Object.entries(porClave).forEach(([clave, regs]) => {
-      if (regs.length < 2) return;
-      const [, fecha] = clave.split("|");
-      const ordenados = [...regs].sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
-      const primero = ordenados[0];
-      const ultimo = ordenados[ordenados.length - 1];
-      const horasTotales = (new Date(ultimo.timestamp) - new Date(primero.timestamp)) / 3600000;
-      const diaSemana = new Date(fecha + "T00:00:00").getDay();
-      const esLunJue = diaSemana >= 1 && diaSemana <= 4;
-      let horasTrabajadas = horasTotales - 0.5 - (esLunJue ? 1 : 0);
-      if (horasTrabajadas < 0) horasTrabajadas = 0;
-      resultado[clave] = { horasTotales: Math.round(horasTotales * 100) / 100, horasTrabajadas: Math.round(horasTrabajadas * 100) / 100, idUltimo: ultimo.id };
+      const entradas = regs.filter((r) => r.type === "entrada").sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
+      const salidas = regs.filter((r) => r.type === "salida").sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
+      if (!entradas.length || !salidas.length) return;
+      const primeraEntrada = entradas[0];
+      const ultimaSalida = salidas[salidas.length - 1];
+      const msTotal = new Date(ultimaSalida.timestamp) - new Date(primeraEntrada.timestamp);
+      if (msTotal <= 0) return;
+      let msTrabajado = msTotal;
+      // Solo se descuenta cada descanso si el periodo trabajado lo atraviesa de verdad
+      if (primeraEntrada.time < "10:00:00" && ultimaSalida.time > "10:00:00") msTrabajado -= 30 * 60000;
+      if (primeraEntrada.time < "14:00:00" && ultimaSalida.time > "15:00:00") msTrabajado -= 60 * 60000;
+      if (msTrabajado < 0) msTrabajado = 0;
+      resultado[clave] = { msTotal, msTrabajado, horasTrabajadasDecimal: Math.round((msTrabajado / 3600000) * 100) / 100, idUltimo: ultimaSalida.id };
     });
     return resultado;
   }, [fichajes]);
@@ -1138,7 +1170,7 @@ function Informes({ api }) {
       dias.forEach((f) => {
         const registro = fichajes.find((x) => x.userName === nombre && x.date === f);
         const clave = registro ? registro.userId + "|" + f : null;
-        const horas = clave && horasPorFichajes[clave] ? horasPorFichajes[clave].horasTrabajadas : 0;
+        const horas = clave && horasPorFichajes[clave] ? horasPorFichajes[clave].horasTrabajadasDecimal : 0;
         fila[claveDia(f)] = horas > 0 ? horas : "";
         total += horas;
       });
@@ -1161,8 +1193,8 @@ function Informes({ api }) {
       const esUltimo = h && h.idUltimo === f.id;
       return {
         Usuario: f.userName, Fecha: f.date, Hora: f.time, Tipo: f.type + (f.automatico ? " (auto)" : ""), Ubicación: f.locationLabel || "",
-        "Horas totales": esUltimo ? h.horasTotales : "",
-        "Horas totales trabajadas": esUltimo ? h.horasTrabajadas : "",
+        "Horas totales": esUltimo ? formatoHMS(h.msTotal) : "",
+        "Horas totales trabajadas": esUltimo ? formatoHMS(h.msTrabajado) : "",
       };
     }));
     XLSX.utils.book_append_sheet(wb, wsFichajes, "Fichajes");
