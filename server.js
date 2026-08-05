@@ -40,7 +40,7 @@ function uid() {
 // -----------------------------------------------------------------
 function seedData() {
   return {
-    users: [{ id: "u_admin", name: "Administrador", role: "admin", pin: "0000" }],
+    users: [{ id: "u_admin", name: "Javi López", role: "admin", pin: "0000" }],
     projects: [
       { id: uid(), name: "Mantenimiento maquinaria", fixed: true },
       { id: uid(), name: "Captación de clientes", fixed: true },
@@ -59,6 +59,7 @@ function seedData() {
     events: [],
     responsablesProyecto: [], // ids de usuarios autorizados a gestionar la familia "proyectos"
     responsablesAuxiliar: [], // ids de usuarios autorizados a gestionar la familia "auxiliares"
+    frases: [], // frases motivacionales del administrador, visibles en el login
     sessions: {},
   };
 }
@@ -77,9 +78,12 @@ function migrate(data) {
     if (!data.projects.some((p) => p.name === nombre)) data.projects.push({ id: uid(), name: nombre, fixed: true });
   });
   data.auxTasks = data.auxTasks || [];
+  data.frases = data.frases || [];
   ["Preparación pedidos PLV", "Mantenimiento maquinaria", "Carga descarga no pedidos"].forEach((nombre) => {
     if (!data.auxTasks.some((t) => t.name === nombre)) data.auxTasks.push({ id: uid(), name: nombre, fixed: true });
   });
+  const admin = data.users.find((u) => u.id === "u_admin");
+  if (admin && admin.name === "Administrador") admin.name = "Javi López";
   return data;
 }
 
@@ -315,6 +319,15 @@ async function handleApi(req, res, pathname, query) {
     return sendJSON(res, 200, data.users.map((u) => ({ id: u.id, name: u.name, role: u.role })));
   }
 
+  if (pathname === "/api/frase-actual" && req.method === "GET") {
+    const data = await loadData();
+    const frases = data.frases || [];
+    if (!frases.length) return sendJSON(res, 200, { texto: null });
+    const dias = Math.floor(Date.now() / 86400000);
+    const idx = Math.floor(dias / 14) % frases.length;
+    return sendJSON(res, 200, { texto: frases[idx].texto });
+  }
+
   if (pathname === "/api/login" && req.method === "POST") {
     const body = await readBody(req);
     const data = await loadData();
@@ -449,6 +462,26 @@ async function handleApi(req, res, pathname, query) {
     return sendJSON(res, 200, { responsablesAuxiliar: updated.responsablesAuxiliar });
   }
 
+  // ---- Frases motivacionales (solo administrador) ----
+  if (pathname === "/api/frases" && req.method === "GET") {
+    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    return sendJSON(res, 200, (await loadData()).frases || []);
+  }
+  if (pathname === "/api/frases" && req.method === "POST") {
+    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    const body = await readBody(req);
+    if (!body.texto || !body.texto.trim()) return sendJSON(res, 400, { error: "Texto requerido" });
+    const item = { id: uid(), texto: body.texto.trim() };
+    const updated = await persist((d) => { d.frases = d.frases || []; d.frases.push(item); return d; });
+    return sendJSON(res, 200, updated.frases);
+  }
+  if (pathname.match(/^\/api\/frases\/[^/]+$/) && req.method === "DELETE") {
+    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    const id = pathname.split("/").pop();
+    const updated = await persist((d) => { d.frases = (d.frases || []).filter((f) => f.id !== id); return d; });
+    return sendJSON(res, 200, updated.frases);
+  }
+
   // ---- Fichajes ----
   if (pathname === "/api/fichajes" && req.method === "POST") {
     const data = await loadData();
@@ -515,7 +548,11 @@ async function handleApi(req, res, pathname, query) {
   }
 
   // ---- Calendario ----
-  if (pathname === "/api/events" && req.method === "GET") return sendJSON(res, 200, (await loadData()).events);
+  if (pathname === "/api/events" && req.method === "GET") {
+    const data = await loadData();
+    const visibles = isAdmin(session) ? data.events : data.events.filter((e) => e.invitados === "todos" || (Array.isArray(e.invitados) && e.invitados.includes(session.userId)));
+    return sendJSON(res, 200, visibles);
+  }
   if (pathname === "/api/events" && req.method === "POST") {
     const data = await loadData();
     if (!puedeGestionarEventos(data, session)) return sendJSON(res, 403, { error: "No autorizado a crear eventos" });
