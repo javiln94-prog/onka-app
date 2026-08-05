@@ -518,6 +518,7 @@ async function handleApi(req, res, pathname, query) {
   if (pathname === "/api/imputaciones/day" && req.method === "PUT") {
     const body = await readBody(req);
     if (!body.date) return sendJSON(res, 400, { error: "Fecha requerida" });
+    if (body.date > todayISO()) return sendJSON(res, 400, { error: "No se pueden imputar horas en días futuros." });
     const cap = dailyCap(body.date);
     const data = await loadData();
     const me = data.users.find((u) => u.id === session.userId);
