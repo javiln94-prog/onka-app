@@ -128,7 +128,7 @@ td{padding:9px 10px;border-bottom:1px solid var(--line);}
 .layout-2col{display:grid;grid-template-columns:minmax(260px,340px) 1fr;gap:20px;}
 .layout-cal{display:grid;grid-template-columns:1fr 300px;gap:20px;}
 .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:10px;font-size:13px;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,.25);}
-.cal-cell{height:80px;border-radius:8px;padding:4px;display:flex;flex-direction:column;gap:2px;overflow:hidden;cursor:pointer;}
+.cal-cell{height:88px;border-radius:8px;padding:4px;display:flex;flex-direction:column;gap:2px;overflow:hidden;cursor:pointer;}
 .cal-tag{font-size:9px;border-radius:5px;padding:1px 4px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .checkrow{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px;}
 @media (max-width: 780px){
@@ -413,6 +413,15 @@ function Fichaje({ api, user, misFichajes, refresh, showToast, events }) {
   const ultimoHoy = sorted.find((f) => f.date === todayISO());
   const proximaAccion = !ultimoHoy || ultimoHoy.type === "salida" ? "entrada" : "salida";
 
+  const { inicioSemana, finSemana } = useMemo(() => {
+    const hoy = new Date();
+    const diaSemana = (hoy.getDay() + 6) % 7; // lunes=0 ... domingo=6
+    const lunes = new Date(hoy); lunes.setDate(hoy.getDate() - diaSemana);
+    const domingo = new Date(lunes); domingo.setDate(lunes.getDate() + 6);
+    return { inicioSemana: toISODate(lunes), finSemana: toISODate(domingo) };
+  }, []);
+  const historialSemana = useMemo(() => sorted.filter((f) => f.date >= inicioSemana && f.date <= finSemana), [sorted, inicioSemana, finSemana]);
+
   const en30Dias = useMemo(() => { const d = new Date(); d.setDate(d.getDate() + 30); return toISODate(d); }, []);
   const proximosEventos = useMemo(() => (events || []).filter((e) => e.date >= todayISO() && e.date <= en30Dias).sort((a, b) => (a.date === b.date ? (a.time || "").localeCompare(b.time || "") : (a.date > b.date ? 1 : -1))), [events, en30Dias]);
 
@@ -443,19 +452,20 @@ function Fichaje({ api, user, misFichajes, refresh, showToast, events }) {
         </div>
 
         <div className="card">
-          <h3 style={{ fontSize: 15, marginBottom: 12 }}>Tu historial reciente</h3>
-          <div className="table-wrap scrollbar" style={{ maxHeight: 380, overflowY: "auto" }}>
+          <h3 style={{ fontSize: 15, marginBottom: 2 }}>Esta semana</h3>
+          <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 12 }}>Hoy arriba del todo — baja para ver el resto de la semana.</div>
+          <div className="table-wrap scrollbar" style={{ maxHeight: 260, overflowY: "auto" }}>
             <table>
               <thead><tr><th>Fecha</th><th>Hora</th><th>Tipo</th><th>Ubicación</th></tr></thead>
               <tbody>
-                {sorted.slice(0, 30).map((f) => (
+                {historialSemana.map((f) => (
                   <tr key={f.id}>
                     <td className="mono">{f.date}</td><td className="mono">{f.time}</td>
                     <td><span className="pill" style={{ background: f.type === "entrada" ? "#E7F3EC" : "#FBEAEA", color: f.type === "entrada" ? "var(--ok)" : "var(--warn)" }}>{f.type}{f.automatico ? " · auto" : ""}</span></td>
                     <td style={{ maxWidth: 260 }}><UbicacionCelda f={f} /></td>
                   </tr>
                 ))}
-                {sorted.length === 0 && <tr><td colSpan={4} style={{ color: "var(--muted)", textAlign: "center", padding: 20 }}>Todavía no hay fichajes.</td></tr>}
+                {historialSemana.length === 0 && <tr><td colSpan={4} style={{ color: "var(--muted)", textAlign: "center", padding: 20 }}>Todavía no hay fichajes esta semana.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -807,6 +817,11 @@ function Calendario({ api, user, events, refreshEvents, config }) {
             return (
               <div key={idx} className="cal-cell" onClick={() => setDiaSel(iso)} style={{ border: esHoy ? "2px solid var(--primary)" : "1px solid var(--line)", background: colorFondo ? colorFondo + "30" : (finde ? "#FAFAF8" : "#fff") }}>
                 <div className="mono" style={{ fontSize: 11, color: finde && !colorFondo ? "var(--muted)" : "var(--ink)", fontWeight: colorFondo ? 700 : 400 }}>{d}</div>
+                {diaCompletoEv && diaCompletoEv.type === "festivo" && (
+                  <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", fontSize: 9, fontWeight: 700, color: colorFondo, lineHeight: 1.15, padding: "0 2px", overflow: "hidden" }}>
+                    {diaCompletoEv.title || TIPO_EVENTO.festivo.label}
+                  </div>
+                )}
                 {visibles.map((e) => <div key={e.id} className="cal-tag" style={{ background: colorDeEvento(e) + "22", color: colorDeEvento(e) }}>{e.time ? e.time + " " : ""}{e.title || TIPO_EVENTO[e.type].label}</div>)}
                 {resto > 0 && <div className="cal-tag" style={{ background: "#EEECE6", color: "var(--muted)" }}>+{resto} más</div>}
               </div>
@@ -840,7 +855,17 @@ function Calendario({ api, user, events, refreshEvents, config }) {
         <DayModal
           fecha={diaSel} eventos={eventosDe(diaSel)} isAdmin={puedeGestionar} users={config?.users || []}
           onClose={() => setDiaSel(null)}
-          onAdd={async (ev) => { await api("POST", "/api/events", { date: diaSel, ...ev }); refreshEvents(); }}
+          onAdd={async (ev) => {
+            if (ev._rangoDesde && ev._rangoHasta) {
+              const { _rangoDesde, _rangoHasta, ...resto } = ev;
+              let d = new Date(_rangoDesde + "T00:00:00");
+              const fin = new Date(_rangoHasta + "T00:00:00");
+              while (d <= fin) { await api("POST", "/api/events", { date: toISODate(d), ...resto }); d.setDate(d.getDate() + 1); }
+            } else {
+              await api("POST", "/api/events", { date: diaSel, ...ev });
+            }
+            refreshEvents();
+          }}
           onDelete={async (id) => { await api("DELETE", "/api/events/" + id); refreshEvents(); }}
         />
       )}
@@ -868,7 +893,7 @@ function DayModal({ fecha, eventos, isAdmin, users, onClose, onAdd, onDelete }) 
         {eventos.length === 0 && !isAdmin && <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 10 }}>No hay eventos este día.</div>}
 
         {isAdmin && !creando && <button className="btn btn-primary btn-sm" onClick={() => setCreando(true)}><Plus size={14} /> Añadir evento</button>}
-        {isAdmin && creando && <FormularioEvento users={users} onCancel={() => setCreando(false)} onSave={async (ev) => { await onAdd(ev); setCreando(false); }} />}
+        {isAdmin && creando && <FormularioEvento fecha={fecha} users={users} onCancel={() => setCreando(false)} onSave={async (ev) => { await onAdd(ev); setCreando(false); }} />}
       </div>
     </div>
   );
@@ -897,7 +922,7 @@ function EventoDetalle({ e, users, isAdmin, onDelete }) {
   );
 }
 
-function FormularioEvento({ users, onCancel, onSave }) {
+function FormularioEvento({ fecha, users, onCancel, onSave }) {
   const [tipo, setTipo] = useState("evento");
   const [titulo, setTitulo] = useState("");
   const [hora, setHora] = useState("");
@@ -907,6 +932,8 @@ function FormularioEvento({ users, onCancel, onSave }) {
   const [seleccionados, setSeleccionados] = useState([]);
   const [ambito, setAmbito] = useState("nacional");
   const [festivoLugar, setFestivoLugar] = useState("");
+  const [vacDesde, setVacDesde] = useState(fecha);
+  const [vacHasta, setVacHasta] = useState(fecha);
 
   const toggleUsuario = (id) => setSeleccionados((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
@@ -917,6 +944,7 @@ function FormularioEvento({ users, onCancel, onSave }) {
       ev.invitados = todos ? "todos" : seleccionados;
     }
     if (tipo === "festivo") { ev.festivoScope = ambito; ev.festivoLugar = ambito === "nacional" ? "" : festivoLugar; }
+    if (tipo === "vacaciones") { ev._rangoDesde = vacDesde; ev._rangoHasta = vacHasta < vacDesde ? vacDesde : vacHasta; }
     onSave(ev);
   };
 
@@ -931,6 +959,19 @@ function FormularioEvento({ users, onCancel, onSave }) {
 
       <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>Título</label>
       <input className="input" style={{ margin: "6px 0 10px" }} placeholder={tipo === "evento" ? "Ej. Reunión de producción" : tipo === "festivo" ? "Ej. Fiestas del pueblo" : "Ej. Vacaciones de verano"} value={titulo} onChange={(e) => setTitulo(e.target.value)} />
+
+      {tipo === "vacaciones" && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>Desde</label>
+            <input type="date" className="input mono" style={{ marginTop: 6 }} value={vacDesde} onChange={(e) => setVacDesde(e.target.value)} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>Hasta</label>
+            <input type="date" className="input mono" style={{ marginTop: 6 }} value={vacHasta} onChange={(e) => setVacHasta(e.target.value)} />
+          </div>
+        </div>
+      )}
 
       {tipo === "festivo" && (
         <>
@@ -1065,13 +1106,65 @@ function Informes({ api }) {
     });
   };
 
+  // Por cada trabajador y día: hora del primer fichaje, hora del último, y las
+  // horas resultantes. "Horas totales trabajadas" resta siempre 30 min (almuerzo)
+  // y, de lunes a jueves, resta también 1h más (la comida de mediodía).
+  const horasPorFichajes = useMemo(() => {
+    const porClave = {};
+    fichajes.forEach((f) => { const k = f.userId + "|" + f.date; (porClave[k] = porClave[k] || []).push(f); });
+    const resultado = {}; // clave "userId|date" -> { horasTotales, horasTrabajadas, idUltimo }
+    Object.entries(porClave).forEach(([clave, regs]) => {
+      if (regs.length < 2) return;
+      const [, fecha] = clave.split("|");
+      const ordenados = [...regs].sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
+      const primero = ordenados[0];
+      const ultimo = ordenados[ordenados.length - 1];
+      const horasTotales = (new Date(ultimo.timestamp) - new Date(primero.timestamp)) / 3600000;
+      const diaSemana = new Date(fecha + "T00:00:00").getDay();
+      const esLunJue = diaSemana >= 1 && diaSemana <= 4;
+      let horasTrabajadas = horasTotales - 0.5 - (esLunJue ? 1 : 0);
+      if (horasTrabajadas < 0) horasTrabajadas = 0;
+      resultado[clave] = { horasTotales: Math.round(horasTotales * 100) / 100, horasTrabajadas: Math.round(horasTrabajadas * 100) / 100, idUltimo: ultimo.id };
+    });
+    return resultado;
+  }, [fichajes]);
+
+  const pivotFichajesGeneral = () => {
+    const dias = diasDelRango();
+    const trabajadores = [...new Set(fichajes.map((f) => f.userName))].sort();
+    return trabajadores.map((nombre) => {
+      const fila = { Trabajador: nombre };
+      let total = 0;
+      dias.forEach((f) => {
+        const registro = fichajes.find((x) => x.userName === nombre && x.date === f);
+        const clave = registro ? registro.userId + "|" + f : null;
+        const horas = clave && horasPorFichajes[clave] ? horasPorFichajes[clave].horasTrabajadas : 0;
+        fila[claveDia(f)] = horas > 0 ? horas : "";
+        total += horas;
+      });
+      fila["Total"] = Math.round(total * 100) / 100;
+      return fila;
+    });
+  };
+
   const exportarExcel = () => {
     const wb = XLSX.utils.book_new();
+    const wsGeneral = XLSX.utils.json_to_sheet(pivotFichajesGeneral());
+    XLSX.utils.book_append_sheet(wb, wsGeneral, "FICHAJES GENERAL");
     const wsHorasDia = XLSX.utils.json_to_sheet(pivotHorasPorTrabajador());
     XLSX.utils.book_append_sheet(wb, wsHorasDia, "Horas por trabajador y día");
     const wsConcepto = XLSX.utils.json_to_sheet(pivotPorConcepto());
     XLSX.utils.book_append_sheet(wb, wsConcepto, "Imputación por concepto");
-    const wsFichajes = XLSX.utils.json_to_sheet([...fichajes].sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1)).map((f) => ({ Usuario: f.userName, Fecha: f.date, Hora: f.time, Tipo: f.type + (f.automatico ? " (auto)" : ""), Ubicación: f.locationLabel || "" })));
+    const wsFichajes = XLSX.utils.json_to_sheet([...fichajes].sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1)).map((f) => {
+      const clave = f.userId + "|" + f.date;
+      const h = horasPorFichajes[clave];
+      const esUltimo = h && h.idUltimo === f.id;
+      return {
+        Usuario: f.userName, Fecha: f.date, Hora: f.time, Tipo: f.type + (f.automatico ? " (auto)" : ""), Ubicación: f.locationLabel || "",
+        "Horas totales": esUltimo ? h.horasTotales : "",
+        "Horas totales trabajadas": esUltimo ? h.horasTrabajadas : "",
+      };
+    }));
     XLSX.utils.book_append_sheet(wb, wsFichajes, "Fichajes");
     XLSX.writeFile(wb, `informe_${desde}_a_${hasta}.xlsx`);
   };
@@ -1206,7 +1299,7 @@ function GestionFamilia({ api, config, refreshConfig, showToast, familia }) {
     <div className="card">
       <h3 style={{ fontSize: 14, marginBottom: 4 }}>{esProyectos ? "Proyectos — Oficina y Fábrica" : "Trabajos auxiliares — Solo Fábrica"}</h3>
       <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 0, marginBottom: 12 }}>
-        {esProyectos ? "Visible en la imputación de horas de oficina y fábrica." : "Visible solo en la imputación de horas de los trabajadores de fábrica."} Los que aparecen <em>en cursiva</em> son los habituales de siempre — puedes cambiarles el nombre, pero no borrarlos.
+        {esProyectos ? "Visible en la imputación de horas de oficina y fábrica." : "Visible solo en la imputación de horas de los trabajadores de fábrica."} Los que aparecen <em>en cursiva</em> son los habituales de siempre.
       </p>
       <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
         <input className="input" style={{ flex: 1, minWidth: 180 }} placeholder="Nombre del nuevo proyecto o trabajo" value={nombre} onChange={(e) => setNombre(e.target.value)} />
@@ -1228,7 +1321,7 @@ function GestionFamilia({ api, config, refreshConfig, showToast, familia }) {
                 <td style={it.fixed ? estiloOpcionFija : undefined}>{it.name}</td>
                 <td style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                   <button className="btn btn-ghost btn-sm" onClick={() => empezarEdicion(it)} title="Editar nombre"><Settings size={13} /></button>
-                  <button className="btn btn-danger btn-sm" onClick={() => delItem(it.id)} disabled={it.fixed} title={it.fixed ? "Concepto habitual — no se puede eliminar" : ""}><Trash2 size={13} /></button>
+                  <button className="btn btn-danger btn-sm" onClick={() => delItem(it.id)}><Trash2 size={13} /></button>
                 </td>
               </>
             )}
