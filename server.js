@@ -314,6 +314,10 @@ function serveStatic(req, res, pathname) {
 async function handleApi(req, res, pathname, query) {
   if (req.method === "OPTIONS") return sendJSON(res, 204, {});
 
+  // Endpoint pensado para servicios externos de "ping" (p. ej. UptimeRobot)
+  // que mantienen el servicio despierto en Render. No toca la base de datos.
+  if (pathname === "/api/health" && req.method === "GET") return sendJSON(res, 200, { ok: true, hora: new Date().toISOString() });
+
   if (pathname === "/api/public-users" && req.method === "GET") {
     const data = await loadData();
     return sendJSON(res, 200, data.users.map((u) => ({ id: u.id, name: u.name, role: u.role })));
