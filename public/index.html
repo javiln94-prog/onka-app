@@ -414,17 +414,11 @@ function Fichaje({ api, user, misFichajes, refresh, showToast, events }) {
   const ultimoHoy = sorted.find((f) => f.date === todayISO());
   const proximaAccion = !ultimoHoy || ultimoHoy.type === "salida" ? "entrada" : "salida";
 
-  const { inicioSemana, finSemana } = useMemo(() => {
-    const hoy = new Date();
-    const diaSemana = (hoy.getDay() + 6) % 7; // lunes=0 ... domingo=6
-    const lunes = new Date(hoy); lunes.setDate(hoy.getDate() - diaSemana);
-    const domingo = new Date(lunes); domingo.setDate(lunes.getDate() + 6);
-    return { inicioSemana: toISODate(lunes), finSemana: toISODate(domingo) };
-  }, []);
-  const historialSemana = useMemo(() => sorted.filter((f) => f.date >= inicioSemana && f.date <= finSemana), [sorted, inicioSemana, finSemana]);
+  const ayerISO = useMemo(() => { const d = new Date(); d.setDate(d.getDate() - 1); return toISODate(d); }, []);
+  const historialSemana = useMemo(() => sorted.filter((f) => f.date === todayISO() || f.date === ayerISO), [sorted, ayerISO]);
 
-  const en30Dias = useMemo(() => { const d = new Date(); d.setDate(d.getDate() + 30); return toISODate(d); }, []);
-  const proximosEventos = useMemo(() => (events || []).filter((e) => e.date >= todayISO() && e.date <= en30Dias).sort((a, b) => (a.date === b.date ? (a.time || "").localeCompare(b.time || "") : (a.date > b.date ? 1 : -1))), [events, en30Dias]);
+  const en15Dias = useMemo(() => { const d = new Date(); d.setDate(d.getDate() + 15); return toISODate(d); }, []);
+  const proximosEventos = useMemo(() => (events || []).filter((e) => e.date >= todayISO() && e.date <= en15Dias).sort((a, b) => (a.date === b.date ? (a.time || "").localeCompare(b.time || "") : (a.date > b.date ? 1 : -1))), [events, en15Dias]);
 
   const fichar = async () => {
     setBusy(true); setMsg(null);
@@ -453,40 +447,40 @@ function Fichaje({ api, user, misFichajes, refresh, showToast, events }) {
         </div>
 
         <div className="card">
-          <h3 style={{ fontSize: 15, marginBottom: 2 }}>Esta semana</h3>
-          <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 12 }}>Hoy arriba del todo — baja para ver el resto de la semana.</div>
-          <div className="table-wrap scrollbar" style={{ maxHeight: 260, overflowY: "auto" }}>
-            <table>
-              <thead><tr><th>Fecha</th><th>Hora</th><th>Tipo</th><th>Ubicación</th></tr></thead>
-              <tbody>
-                {historialSemana.map((f) => (
-                  <tr key={f.id} style={{ whiteSpace: "nowrap" }}>
-                    <td className="mono">{f.date}</td><td className="mono">{f.time}</td>
-                    <td><span className="pill" style={{ background: f.type === "entrada" ? "#E7F3EC" : "#FBEAEA", color: f.type === "entrada" ? "var(--ok)" : "var(--warn)" }}>{f.type}{f.automatico ? " · auto" : ""}</span></td>
-                    <td className="td-clip"><UbicacionCelda f={f} /></td>
-                  </tr>
-                ))}
-                {historialSemana.length === 0 && <tr><td colSpan={4} style={{ color: "var(--muted)", textAlign: "center", padding: 20 }}>Todavía no hay fichajes esta semana.</td></tr>}
-              </tbody>
-            </table>
-          </div>
+          <h3 style={{ fontSize: 14, marginBottom: 10 }}>Próximos eventos (15 días)</h3>
+          {proximosEventos.length === 0 ? (
+            <div style={{ color: "var(--muted)", fontSize: 13 }}>No tienes eventos próximos.</div>
+          ) : (
+            <div className="scrollbar" style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 260, overflowY: "auto" }}>
+              {proximosEventos.map((e) => (
+                <div key={e.id} style={{ borderLeft: `3px solid ${colorDeEvento(e)}`, paddingLeft: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>{e.title || TIPO_EVENTO[e.type].label}</div>
+                  <div className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>{e.date}{e.time ? " · " + e.time : ""}{e.location ? " · " + e.location : ""}</div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
       <div className="card">
-        <h3 style={{ fontSize: 14, marginBottom: 10 }}>Próximos eventos (30 días)</h3>
-        {proximosEventos.length === 0 ? (
-          <div style={{ color: "var(--muted)", fontSize: 13 }}>No tienes eventos próximos.</div>
-        ) : (
-          <div className="scrollbar" style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 132, overflowY: "auto" }}>
-            {proximosEventos.map((e) => (
-              <div key={e.id} style={{ borderLeft: `3px solid ${colorDeEvento(e)}`, paddingLeft: 8 }}>
-                <div style={{ fontSize: 13, fontWeight: 700 }}>{e.title || TIPO_EVENTO[e.type].label}</div>
-                <div className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>{e.date}{e.time ? " · " + e.time : ""}{e.location ? " · " + e.location : ""}</div>
-              </div>
-            ))}
-          </div>
-        )}
+        <h3 style={{ fontSize: 15, marginBottom: 2 }}>Hoy y ayer</h3>
+        <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 12 }}>Hoy arriba del todo.</div>
+        <div className="table-wrap scrollbar" style={{ maxHeight: 220, overflowY: "auto" }}>
+          <table>
+            <thead><tr><th>Fecha</th><th>Hora</th><th>Tipo</th><th>Ubicación</th></tr></thead>
+            <tbody>
+              {historialSemana.map((f) => (
+                <tr key={f.id} style={{ whiteSpace: "nowrap" }}>
+                  <td className="mono">{f.date}</td><td className="mono">{f.time.slice(0, 5)}</td>
+                  <td><span className="pill" style={{ background: f.type === "entrada" ? "#E7F3EC" : "#FBEAEA", color: f.type === "entrada" ? "var(--ok)" : "var(--warn)" }}>{f.type}{f.automatico ? " · auto" : ""}</span></td>
+                  <td className="td-clip"><UbicacionCelda f={f} /></td>
+                </tr>
+              ))}
+              {historialSemana.length === 0 && <tr><td colSpan={4} style={{ color: "var(--muted)", textAlign: "center", padding: 20 }}>Todavía no hay fichajes.</td></tr>}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="card">
@@ -523,7 +517,7 @@ function opcionesDe(config, user) {
   const ordenar = (list) => [...list].sort((a, b) => (a.fixed === b.fixed ? 0 : a.fixed ? 1 : -1));
   const especiales = config.projects.filter((p) => CONCEPTOS_ESPECIALES.includes(p.name));
   const proyectosTodos = ordenar(config.projects.filter((p) => !CONCEPTOS_ESPECIALES.includes(p.name)).map((p) => ({ id: p.id, name: p.name, fixed: !!p.fixed, visible: p.visible !== false })));
-  const auxiliaresTodos = user.role === "fabrica" ? ordenar(config.auxTasks.map((t) => ({ id: t.id, name: t.name, fixed: !!t.fixed, visible: t.visible !== false }))) : [];
+  const auxiliaresTodos = (user.role === "fabrica" || user.role === "admin") ? ordenar(config.auxTasks.map((t) => ({ id: t.id, name: t.name, fixed: !!t.fixed, visible: t.visible !== false }))) : [];
   const proyectos = proyectosTodos.filter((p) => p.visible);
   const auxiliares = auxiliaresTodos.filter((t) => t.visible);
   return { proyectos, auxiliares, especiales, proyectosTodos, auxiliaresTodos };
@@ -580,7 +574,7 @@ function ImputacionHoras({ api, user, config, showToast }) {
   const [dirty, setDirty] = useState(false);
   const { proyectos, auxiliares, especiales, proyectosTodos, auxiliaresTodos } = useMemo(() => opcionesDe(config, user), [config, user]);
   const opciones = { proyectos, auxiliares, proyectosTodos, auxiliaresTodos };
-  const esFabrica = user.role === "fabrica" && auxiliares.length > 0;
+  const esFabrica = (user.role === "fabrica" || user.role === "admin") && auxiliares.length > 0;
   const cap = dailyCap(fecha);
 
   const idsAuxiliares = useMemo(() => new Set(auxiliaresTodos.map((a) => a.id)), [auxiliaresTodos]);
@@ -838,9 +832,9 @@ function VistaQuincenal({ events, setDiaSel }) {
           return (
             <div key={iso} onClick={() => setDiaSel(iso)} style={{ border: esHoy ? "2px solid var(--primary)" : "1px solid var(--line)", borderRadius: 8, padding: 6, minHeight: 118, background: colorFondo ? colorFondo + "22" : "#fff", cursor: "pointer", display: "flex", flexDirection: "column", gap: 4, overflow: "hidden" }}>
               <div className="mono" style={{ fontSize: 10.5, color: "var(--muted)" }}>{DIAS_CORTOS[(dt.getDay() + 6) % 7]} {dt.getDate()}</div>
-              {diaCompletoEv && <div style={{ fontSize: 10.5, fontWeight: 700, color: colorFondo, lineHeight: 1.2 }}>{diaCompletoEv.title || TIPO_EVENTO[diaCompletoEv.type].label}</div>}
+              {diaCompletoEv && <div style={{ fontSize: 10.5, fontWeight: 700, color: colorFondo, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>{diaCompletoEv.title || TIPO_EVENTO[diaCompletoEv.type].label}</div>}
               {otros.slice(0, 3).map((e) => (
-                <div key={e.id} style={{ fontSize: 10, borderRadius: 4, padding: "2px 4px", background: colorDeEvento(e) + "1f", color: colorDeEvento(e), lineHeight: 1.25 }}>
+                <div key={e.id} style={{ fontSize: 10, borderRadius: 4, padding: "2px 4px", background: colorDeEvento(e) + "1f", color: colorDeEvento(e), lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>
                   {e.time ? e.time + " " : ""}{e.title || TIPO_EVENTO[e.type].label}
                 </div>
               ))}
@@ -1415,7 +1409,7 @@ function Informes({ api, showToast }) {
         <div className="table-wrap scrollbar" style={{ maxHeight: 320, overflowY: "auto" }}>
           <table><thead><tr><th>Usuario</th><th>Fecha</th><th>Hora</th><th>Tipo</th><th>Ubicación</th></tr></thead><tbody>
             {[...fichajes].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1)).map((f) => (
-              <tr key={f.id}><td>{f.userName}</td><td className="mono">{f.date}</td><td className="mono">{f.time}</td>
+              <tr key={f.id}><td>{f.userName}</td><td className="mono">{f.date}</td><td className="mono">{f.time.slice(0, 5)}</td>
               <td><span className="pill" style={{ background: f.type === "entrada" ? "#E7F3EC" : "#FBEAEA", color: f.type === "entrada" ? "var(--ok)" : "var(--warn)" }}>{f.type}{f.automatico ? " · auto" : ""}</span></td>
               <td className="td-clip"><UbicacionCelda f={f} /></td></tr>
             ))}
@@ -1509,14 +1503,17 @@ function GestionUsuarios({ api, refreshConfig, showToast }) {
         <h3 style={{ fontSize: 14, marginBottom: 10 }}>Trabajadores</h3>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Nombre</th><th>Rol</th><th>PIN</th><th>Resp. proyectos</th><th>Resp. auxiliares</th><th></th></tr></thead>
+            <thead><tr><th>Trabajador</th><th style={{ width: 60 }}>Proy.</th><th style={{ width: 60 }}>Aux.</th><th style={{ width: 40 }}></th></tr></thead>
             <tbody>
               {usuarios.map((u) => (
                 <tr key={u.id}>
-                  <td>{u.name}</td><td>{roleLabels[u.role]}</td><td className="mono">{u.pin}</td>
-                  <td>{u.role !== "admin" && <button className={`btn btn-sm ${respProy.includes(u.id) ? "btn-accent" : "btn-ghost"}`} onClick={() => toggleRespProy(u.id)}><ShieldCheck size={13} /> {respProy.includes(u.id) ? "Sí" : "No"}</button>}</td>
-                  <td>{u.role !== "admin" && <button className={`btn btn-sm ${respAux.includes(u.id) ? "btn-accent" : "btn-ghost"}`} onClick={() => toggleRespAux(u.id)}><ShieldCheck size={13} /> {respAux.includes(u.id) ? "Sí" : "No"}</button>}</td>
-                  <td>{u.role !== "admin" && <button className="btn btn-danger btn-sm" onClick={() => delUser(u.id)}><Trash2 size={13} /></button>}</td>
+                  <td className="td-clip">
+                    <div style={{ fontWeight: 600 }}>{u.name}</div>
+                    <div style={{ fontSize: 11, color: "var(--muted)" }}>{roleLabels[u.role]} · PIN <span className="mono">{u.pin}</span></div>
+                  </td>
+                  <td>{u.role !== "admin" && <button className={`btn btn-sm ${respProy.includes(u.id) ? "btn-accent" : "btn-ghost"}`} onClick={() => toggleRespProy(u.id)} title="Responsable de proyectos"><ShieldCheck size={13} /></button>}</td>
+                  <td>{u.role !== "admin" && <button className={`btn btn-sm ${respAux.includes(u.id) ? "btn-accent" : "btn-ghost"}`} onClick={() => toggleRespAux(u.id)} title="Responsable de auxiliares"><ShieldCheck size={13} /></button>}</td>
+                  <td>{u.role !== "admin" && <button className="btn btn-danger btn-sm" onClick={() => delUser(u.id)} title="Eliminar"><Trash2 size={13} /></button>}</td>
                 </tr>
               ))}
             </tbody>
