@@ -120,7 +120,8 @@ textarea.input{resize:vertical;min-height:70px;}
 .tab.active{background:rgba(255,255,255,0.12);color:#fff;}
 table{width:100%;border-collapse:collapse;font-size:13.5px;table-layout:fixed;}
 th{text-align:left;padding:8px 10px;color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--line);white-space:nowrap;}
-td{padding:9px 10px;border-bottom:1px solid var(--line);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:0;}
+td{padding:9px 10px;border-bottom:1px solid var(--line);}
+.td-clip{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:0;}
 ::placeholder{color:#9AA0A6;}
 .scrollbar::-webkit-scrollbar{height:6px;width:6px;}
 .scrollbar::-webkit-scrollbar-thumb{background:#D8D4C9;border-radius:6px;}
@@ -462,7 +463,7 @@ function Fichaje({ api, user, misFichajes, refresh, showToast, events }) {
                   <tr key={f.id} style={{ whiteSpace: "nowrap" }}>
                     <td className="mono">{f.date}</td><td className="mono">{f.time}</td>
                     <td><span className="pill" style={{ background: f.type === "entrada" ? "#E7F3EC" : "#FBEAEA", color: f.type === "entrada" ? "var(--ok)" : "var(--warn)" }}>{f.type}{f.automatico ? " · auto" : ""}</span></td>
-                    <td style={{ maxWidth: 160 }}><UbicacionCelda f={f} /></td>
+                    <td className="td-clip"><UbicacionCelda f={f} /></td>
                   </tr>
                 ))}
                 {historialSemana.length === 0 && <tr><td colSpan={4} style={{ color: "var(--muted)", textAlign: "center", padding: 20 }}>Todavía no hay fichajes esta semana.</td></tr>}
@@ -1205,12 +1206,47 @@ function pivotPorConceptoDe(imputacionesArr) {
   });
 }
 
+// Resumen simplificado y compacto (pensado para verse bien en el móvil):
+// filas = trabajador, columnas = Horas normales / Horas excedentes / Total.
+// "Normales" es lo trabajado hasta el máximo del día (8,5h L-J, 5h V);
+// lo que pase de ahí (según el fichaje real) se cuenta como excedente.
+function resumenFichajesPorTrabajador(fichajesArr) {
+  const horas = calcularHorasPorFichajes(fichajesArr);
+  const acc = {};
+  Object.entries(horas).forEach(([clave, datos]) => {
+    const [userId, fecha] = clave.split("|");
+    const registro = fichajesArr.find((f) => f.userId === userId && f.date === fecha);
+    if (!registro) return;
+    const capMs = dailyCap(fecha) * 3600000;
+    const normal = Math.min(datos.msTrabajado, capMs);
+    const excedente = Math.max(0, datos.msTrabajado - capMs);
+    if (!acc[registro.userName]) acc[registro.userName] = { normal: 0, excedente: 0 };
+    acc[registro.userName].normal += normal;
+    acc[registro.userName].excedente += excedente;
+  });
+  return Object.entries(acc)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([nombre, v]) => ({ Trabajador: nombre, "Horas normales": formatoHMS(v.normal), "Horas excedentes": formatoHMS(v.excedente), "Total horas": formatoHMS(v.normal + v.excedente) }));
+}
+
+// Resumen simplificado de imputación: filas = concepto, columna = Total horas
+// (sumando entre todos los trabajadores).
+function resumenImputacionPorConcepto(imputacionesArr) {
+  const acc = {};
+  imputacionesArr.forEach((i) => { acc[i.projectName] = (acc[i.projectName] || 0) + i.hours; });
+  return Object.entries(acc)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([concepto, total]) => ({ Concepto: concepto, "Total horas": Math.round(total * 100) / 100 }));
+}
+
 function Informes({ api, showToast }) {
   const [desde, setDesde] = useState(toISODate(new Date(new Date().getFullYear(), new Date().getMonth(), 1)));
   const [hasta, setHasta] = useState(todayISO());
   const [fichajes, setFichajes] = useState([]);
   const [imputaciones, setImputaciones] = useState([]);
   const [cargando, setCargando] = useState(false);
+  const [fichajesAnioActual, setFichajesAnioActual] = useState([]);
+  const [imputAnioActual, setImputAnioActual] = useState([]);
 
   const cargar = useCallback(() => {
     setCargando(true);
@@ -1218,6 +1254,18 @@ function Informes({ api, showToast }) {
       .then(([f, i]) => { setFichajes(f); setImputaciones(i); }).finally(() => setCargando(false));
   }, [api, desde, hasta]);
   useEffect(() => { cargar(); }, [cargar]);
+
+  useEffect(() => {
+    const anio = new Date().getFullYear();
+    Promise.all([
+      api("GET", `/api/fichajes?desde=${anio}-01-01&hasta=${anio}-12-31`),
+      api("GET", `/api/imputaciones/report?desde=${anio}-01-01&hasta=${anio}-12-31`),
+    ]).then(([f, i]) => { setFichajesAnioActual(f); setImputAnioActual(i); }).catch(() => {});
+  }, [api]);
+
+  const mesActualISO = todayISO().slice(0, 7);
+  const fichajesMesActual = useMemo(() => fichajesAnioActual.filter((f) => f.date.slice(0, 7) === mesActualISO), [fichajesAnioActual, mesActualISO]);
+  const imputMesActual = useMemo(() => imputAnioActual.filter((i) => i.date.slice(0, 7) === mesActualISO), [imputAnioActual, mesActualISO]);
 
   const diasDelRango = () => {
     const dias = [];
@@ -1369,22 +1417,34 @@ function Informes({ api, showToast }) {
             {[...fichajes].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1)).map((f) => (
               <tr key={f.id}><td>{f.userName}</td><td className="mono">{f.date}</td><td className="mono">{f.time}</td>
               <td><span className="pill" style={{ background: f.type === "entrada" ? "#E7F3EC" : "#FBEAEA", color: f.type === "entrada" ? "var(--ok)" : "var(--warn)" }}>{f.type}{f.automatico ? " · auto" : ""}</span></td>
-              <td><UbicacionCelda f={f} /></td></tr>
+              <td className="td-clip"><UbicacionCelda f={f} /></td></tr>
             ))}
           </tbody></table>
         </div>
       </div>
 
       <div className="card">
-        <h3 style={{ fontSize: 14, marginBottom: 4 }}>Resumen general — FICHAJES GENERAL</h3>
-        <p style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 0, marginBottom: 10 }}>Horas trabajadas de cada trabajador, día a día (lo mismo que la pestaña del Excel).</p>
-        <TablaPivote datos={pivotFichajesGeneral()} primeraColumna="Trabajador" />
+        <h3 style={{ fontSize: 14, marginBottom: 4 }}>FICHAJES GENERAL — Acumulado del mes</h3>
+        <p style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 0, marginBottom: 10 }}>Horas de {MESES[new Date().getMonth()].toLowerCase()} de {new Date().getFullYear()}, por trabajador.</p>
+        <TablaPivote datos={resumenFichajesPorTrabajador(fichajesMesActual)} primeraColumna="Trabajador" />
       </div>
 
       <div className="card">
-        <h3 style={{ fontSize: 14, marginBottom: 4 }}>Resumen general — IMPUTACION GENERAL</h3>
-        <p style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 0, marginBottom: 10 }}>Horas imputadas por concepto y trabajador (lo mismo que la pestaña del Excel).</p>
-        <TablaPivote datos={pivotPorConcepto()} primeraColumna="Concepto" />
+        <h3 style={{ fontSize: 14, marginBottom: 4 }}>FICHAJES GENERAL — Acumulado del año</h3>
+        <p style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 0, marginBottom: 10 }}>Horas acumuladas en {new Date().getFullYear()}, por trabajador.</p>
+        <TablaPivote datos={resumenFichajesPorTrabajador(fichajesAnioActual)} primeraColumna="Trabajador" />
+      </div>
+
+      <div className="card">
+        <h3 style={{ fontSize: 14, marginBottom: 4 }}>IMPUTACION GENERAL — Acumulado del mes</h3>
+        <p style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 0, marginBottom: 10 }}>Horas imputadas en {MESES[new Date().getMonth()].toLowerCase()} de {new Date().getFullYear()}, por concepto.</p>
+        <TablaPivote datos={resumenImputacionPorConcepto(imputMesActual)} primeraColumna="Concepto" />
+      </div>
+
+      <div className="card">
+        <h3 style={{ fontSize: 14, marginBottom: 4 }}>IMPUTACION GENERAL — Acumulado del año</h3>
+        <p style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 0, marginBottom: 10 }}>Horas imputadas en {new Date().getFullYear()}, por concepto.</p>
+        <TablaPivote datos={resumenImputacionPorConcepto(imputAnioActual)} primeraColumna="Concepto" />
       </div>
     </div>
   );
@@ -1400,7 +1460,7 @@ function TablaPivote({ datos, primeraColumna }) {
         <tbody>
           {datos.map((fila, i) => (
             <tr key={i}>
-              {columnas.map((c) => <td key={c} className={c === primeraColumna ? "" : "mono"} style={c === "Total" ? { fontWeight: 700 } : undefined}>{fila[c]}</td>)}
+              {columnas.map((c) => <td key={c} className={c === primeraColumna ? "" : "mono"} style={c.startsWith("Total") ? { fontWeight: 700 } : undefined}>{fila[c]}</td>)}
             </tr>
           ))}
         </tbody>
@@ -1501,7 +1561,7 @@ function GestionFamilia({ api, config, refreshConfig, showToast, familia }) {
         <input className="input" style={{ flex: 1, minWidth: 180 }} placeholder="Nombre del nuevo proyecto o trabajo" value={nombre} onChange={(e) => setNombre(e.target.value)} />
         <button className="btn btn-primary" onClick={addItem}><Plus size={14} /> Añadir</button>
       </div>
-      <div className="table-wrap"><table><thead><tr><th>Nombre</th><th></th></tr></thead><tbody>
+      <div className="table-wrap"><table><thead><tr><th>Nombre</th><th style={{ width: 128 }}></th></tr></thead><tbody>
         {items.map((it) => (
           <tr key={it.id} style={it.visible === false ? { opacity: 0.55 } : undefined}>
             {editandoId === it.id ? (
@@ -1514,9 +1574,9 @@ function GestionFamilia({ api, config, refreshConfig, showToast, familia }) {
               </td>
             ) : (
               <>
-                <td style={it.fixed ? estiloOpcionFija : undefined}>{it.name}{it.visible === false && <span className="pill" style={{ marginLeft: 8, background: "#EEECE6", color: "var(--muted)" }}>Oculto</span>}</td>
-                <td style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                  <button className={`btn btn-sm ${it.visible === false ? "btn-ghost" : "btn-accent"}`} onClick={() => toggleVisible(it)} title={it.visible === false ? "Mostrar en la imputación" : "Ocultar de la imputación"}>{it.visible === false ? "Mostrar" : "Ocultar"}</button>
+                <td className="td-clip" style={it.fixed ? estiloOpcionFija : undefined}>{it.name}{it.visible === false && <span className="pill" style={{ marginLeft: 8, background: "#EEECE6", color: "var(--muted)" }}>Oculto</span>}</td>
+                <td style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+                  <button className={`btn btn-sm ${it.visible === false ? "btn-ghost" : "btn-accent"}`} onClick={() => toggleVisible(it)} title={it.visible === false ? "Mostrar en la imputación" : "Ocultar de la imputación"}>{it.visible === false ? <EyeOff size={13} /> : <Eye size={13} />}</button>
                   <button className="btn btn-ghost btn-sm" onClick={() => empezarEdicion(it)} title="Editar nombre"><Settings size={13} /></button>
                   <button className="btn btn-danger btn-sm" onClick={() => delItem(it.id)}><Trash2 size={13} /></button>
                 </td>
@@ -1595,6 +1655,8 @@ const ShieldCheck = (p) => <Icon {...p}><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 
 const Cog = (p) => <Icon {...p}><circle cx="12" cy="12" r="5" /><line x1="20" y1="12" x2="22.5" y2="12" /><line x1="17.7" y1="17.7" x2="19.6" y2="19.6" /><line x1="12" y1="20" x2="12" y2="22.5" /><line x1="6.3" y1="17.7" x2="4.4" y2="19.6" /><line x1="4" y1="12" x2="1.5" y2="12" /><line x1="6.3" y1="6.3" x2="4.4" y2="4.4" /><line x1="12" y1="4" x2="12" y2="1.5" /><line x1="17.7" y1="6.3" x2="19.6" y2="4.4" /></Icon>;
 const Briefcase = (p) => <Icon {...p}><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></Icon>;
 const BellRing = (p) => <Icon {...p}><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /><path d="M4 2C2.8 3 2 4.5 2 6" /><path d="M22 6c0-1.5-.8-3-2-4" /></Icon>;
+const Eye = (p) => <Icon {...p}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></Icon>;
+const EyeOff = (p) => <Icon {...p}><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c6.5 0 10 8 10 8a17.4 17.4 0 0 1-2.44 3.5" /><path d="M6.35 6.35C3.9 8 2 12 2 12a17.5 17.5 0 0 0 5 5.5c1.3.98 2.8 1.7 4.4 2" /><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" /><line x1="2" y1="2" x2="22" y2="22" /></Icon>;
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(<ErrorBoundary><App /></ErrorBoundary>);
