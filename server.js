@@ -42,17 +42,17 @@ function seedData() {
   return {
     users: [{ id: "u_admin", name: "Javi López", role: "admin", pin: "0000" }],
     projects: [
-      { id: uid(), name: "Mantenimiento maquinaria", fixed: true },
-      { id: uid(), name: "Captación de clientes", fixed: true },
-      { id: uid(), name: "Reunión proveedores", fixed: true },
-      { id: uid(), name: "Administración", fixed: true },
-      { id: uid(), name: "Baja médica", fixed: true },
-      { id: uid(), name: "Asuntos propios", fixed: true },
+      { id: uid(), name: "Mantenimiento maquinaria", fixed: true, visible: true },
+      { id: uid(), name: "Captación de clientes", fixed: true, visible: true },
+      { id: uid(), name: "Reunión proveedores", fixed: true, visible: true },
+      { id: uid(), name: "Administración", fixed: true, visible: true },
+      { id: uid(), name: "Baja médica", fixed: true, visible: true },
+      { id: uid(), name: "Asuntos propios", fixed: true, visible: true },
     ],
     auxTasks: [
-      { id: uid(), name: "Preparación pedidos PLV", fixed: true },
-      { id: uid(), name: "Mantenimiento maquinaria", fixed: true },
-      { id: uid(), name: "Carga descarga no pedidos", fixed: true },
+      { id: uid(), name: "Preparación pedidos PLV", fixed: true, visible: true },
+      { id: uid(), name: "Mantenimiento maquinaria", fixed: true, visible: true },
+      { id: uid(), name: "Carga descarga no pedidos", fixed: true, visible: true },
     ],
     fichajes: [],
     imputaciones: [],
@@ -79,6 +79,8 @@ function migrate(data) {
   });
   data.auxTasks = data.auxTasks || [];
   data.frases = data.frases || [];
+  data.projects = data.projects.map((p) => ({ visible: true, ...p }));
+  data.auxTasks = data.auxTasks.map((t) => ({ visible: true, ...t }));
   ["Preparación pedidos PLV", "Mantenimiento maquinaria", "Carga descarga no pedidos"].forEach((nombre) => {
     if (!data.auxTasks.some((t) => t.name === nombre)) data.auxTasks.push({ id: uid(), name: nombre, fixed: true });
   });
@@ -369,7 +371,7 @@ async function handleApi(req, res, pathname, query) {
     if (!puedeProyectos(data)) return sendJSON(res, 403, { error: "No autorizado a crear proyectos" });
     const body = await readBody(req);
     if (!body.name || !body.name.trim()) return sendJSON(res, 400, { error: "Nombre requerido" });
-    const project = { id: uid(), name: body.name.trim(), fixed: !!body.fixed };
+    const project = { id: uid(), name: body.name.trim(), fixed: !!body.fixed, visible: true };
     const updated = await persist((d) => { d.projects.push(project); return d; });
     return sendJSON(res, 200, updated.projects);
   }
@@ -378,7 +380,7 @@ async function handleApi(req, res, pathname, query) {
     if (!puedeProyectos(data)) return sendJSON(res, 403, { error: "No autorizado" });
     const id = pathname.split("/").pop();
     const body = await readBody(req);
-    const updated = await persist((d) => { d.projects = d.projects.map((p) => (p.id === id ? { ...p, ...(body.name !== undefined ? { name: body.name } : {}), ...(body.fixed !== undefined ? { fixed: !!body.fixed } : {}) } : p)); return d; });
+    const updated = await persist((d) => { d.projects = d.projects.map((p) => (p.id === id ? { ...p, ...(body.name !== undefined ? { name: body.name } : {}), ...(body.fixed !== undefined ? { fixed: !!body.fixed } : {}), ...(body.visible !== undefined ? { visible: !!body.visible } : {}) } : p)); return d; });
     return sendJSON(res, 200, updated.projects);
   }
   if (pathname.match(/^\/api\/projects\/[^/]+$/) && req.method === "DELETE") {
@@ -396,7 +398,7 @@ async function handleApi(req, res, pathname, query) {
     if (!puedeAuxiliar(data)) return sendJSON(res, 403, { error: "No autorizado a crear trabajos auxiliares" });
     const body = await readBody(req);
     if (!body.name || !body.name.trim()) return sendJSON(res, 400, { error: "Nombre requerido" });
-    const task = { id: uid(), name: body.name.trim(), fixed: !!body.fixed };
+    const task = { id: uid(), name: body.name.trim(), fixed: !!body.fixed, visible: true };
     const updated = await persist((d) => { d.auxTasks.push(task); return d; });
     return sendJSON(res, 200, updated.auxTasks);
   }
@@ -405,7 +407,7 @@ async function handleApi(req, res, pathname, query) {
     if (!puedeAuxiliar(data)) return sendJSON(res, 403, { error: "No autorizado" });
     const id = pathname.split("/").pop();
     const body = await readBody(req);
-    const updated = await persist((d) => { d.auxTasks = d.auxTasks.map((t) => (t.id === id ? { ...t, ...(body.name !== undefined ? { name: body.name } : {}), ...(body.fixed !== undefined ? { fixed: !!body.fixed } : {}) } : t)); return d; });
+    const updated = await persist((d) => { d.auxTasks = d.auxTasks.map((t) => (t.id === id ? { ...t, ...(body.name !== undefined ? { name: body.name } : {}), ...(body.fixed !== undefined ? { fixed: !!body.fixed } : {}), ...(body.visible !== undefined ? { visible: !!body.visible } : {}) } : t)); return d; });
     return sendJSON(res, 200, updated.auxTasks);
   }
   if (pathname.match(/^\/api\/aux-tasks\/[^/]+$/) && req.method === "DELETE") {
