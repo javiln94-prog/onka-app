@@ -46,7 +46,7 @@
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone@7.29.7/babel.min.js"></script>
-<script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://unpkg.com/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script>
   // Si por lo que sea (red lenta, bloqueador de contenido, etc.) alguna de las
   // librerías de arriba no llega a cargar, sin esto la pantalla se queda en
@@ -459,10 +459,10 @@ function Fichaje({ api, user, misFichajes, refresh, showToast, events }) {
               <thead><tr><th>Fecha</th><th>Hora</th><th>Tipo</th><th>Ubicación</th></tr></thead>
               <tbody>
                 {historialSemana.map((f) => (
-                  <tr key={f.id}>
+                  <tr key={f.id} style={{ whiteSpace: "nowrap" }}>
                     <td className="mono">{f.date}</td><td className="mono">{f.time}</td>
                     <td><span className="pill" style={{ background: f.type === "entrada" ? "#E7F3EC" : "#FBEAEA", color: f.type === "entrada" ? "var(--ok)" : "var(--warn)" }}>{f.type}{f.automatico ? " · auto" : ""}</span></td>
-                    <td style={{ maxWidth: 260 }}><UbicacionCelda f={f} /></td>
+                    <td style={{ maxWidth: 160 }}><UbicacionCelda f={f} /></td>
                   </tr>
                 ))}
                 {historialSemana.length === 0 && <tr><td colSpan={4} style={{ color: "var(--muted)", textAlign: "center", padding: 20 }}>Todavía no hay fichajes esta semana.</td></tr>}
@@ -477,7 +477,7 @@ function Fichaje({ api, user, misFichajes, refresh, showToast, events }) {
         {proximosEventos.length === 0 ? (
           <div style={{ color: "var(--muted)", fontSize: 13 }}>No tienes eventos próximos.</div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div className="scrollbar" style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 132, overflowY: "auto" }}>
             {proximosEventos.map((e) => (
               <div key={e.id} style={{ borderLeft: `3px solid ${colorDeEvento(e)}`, paddingLeft: 8 }}>
                 <div style={{ fontSize: 13, fontWeight: 700 }}>{e.title || TIPO_EVENTO[e.type].label}</div>
@@ -500,9 +500,10 @@ function Fichaje({ api, user, misFichajes, refresh, showToast, events }) {
 }
 
 function UbicacionCelda({ f }) {
-  if (f.lat == null) return <span style={{ color: f.automatico ? "var(--warn)" : "var(--muted)" }}>{f.locationLabel || "Sin ubicación"}</span>;
+  const estiloLinea = { display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" };
+  if (f.lat == null) return <span style={{ ...estiloLinea, color: f.automatico ? "var(--warn)" : "var(--muted)" }}>{f.locationLabel || "Sin ubicación"}</span>;
   const mapsUrl = `https://www.google.com/maps?q=${f.lat},${f.lng}`;
-  return <a href={mapsUrl} target="_blank" rel="noreferrer" style={{ color: "var(--ink)", textDecoration: "underline", fontSize: 12.5 }}>{f.locationLabel ? f.locationLabel.split(",").slice(0, 3).join(",") : `${f.lat.toFixed(4)}, ${f.lng.toFixed(4)}`}</a>;
+  return <a href={mapsUrl} target="_blank" rel="noreferrer" style={{ ...estiloLinea, color: "var(--ink)", textDecoration: "underline", fontSize: 12.5 }}>{f.locationLabel ? f.locationLabel.split(",").slice(0, 2).join(",") : `${f.lat.toFixed(4)}, ${f.lng.toFixed(4)}`}</a>;
 }
 function RelojEnVivo() {
   const [now, setNow] = useState(new Date());
@@ -517,12 +518,14 @@ const CONCEPTOS_ESPECIALES = ["Baja médica", "Asuntos propios"];
 const ESPECIAL_COLOR = { "Baja médica": "#B3433A", "Asuntos propios": "#5B6BA8" };
 
 function opcionesDe(config, user) {
-  if (!config) return { proyectos: [], auxiliares: [], especiales: [] };
+  if (!config) return { proyectos: [], auxiliares: [], especiales: [], proyectosTodos: [], auxiliaresTodos: [] };
   const ordenar = (list) => [...list].sort((a, b) => (a.fixed === b.fixed ? 0 : a.fixed ? 1 : -1));
   const especiales = config.projects.filter((p) => CONCEPTOS_ESPECIALES.includes(p.name));
-  const proyectos = ordenar(config.projects.filter((p) => !CONCEPTOS_ESPECIALES.includes(p.name)).map((p) => ({ id: p.id, name: p.name, fixed: !!p.fixed })));
-  const auxiliares = user.role === "fabrica" ? ordenar(config.auxTasks.map((t) => ({ id: t.id, name: t.name, fixed: !!t.fixed }))) : [];
-  return { proyectos, auxiliares, especiales };
+  const proyectosTodos = ordenar(config.projects.filter((p) => !CONCEPTOS_ESPECIALES.includes(p.name)).map((p) => ({ id: p.id, name: p.name, fixed: !!p.fixed, visible: p.visible !== false })));
+  const auxiliaresTodos = user.role === "fabrica" ? ordenar(config.auxTasks.map((t) => ({ id: t.id, name: t.name, fixed: !!t.fixed, visible: t.visible !== false }))) : [];
+  const proyectos = proyectosTodos.filter((p) => p.visible);
+  const auxiliares = auxiliaresTodos.filter((t) => t.visible);
+  return { proyectos, auxiliares, especiales, proyectosTodos, auxiliaresTodos };
 }
 
 // Estilo visual (sin la palabra "fijo") para distinguir los conceptos
@@ -553,11 +556,13 @@ function FamilyToggle({ family, setFamily }) {
 
 function FilaImputacion({ f, opciones, mostrarToggleFamilia, cap, onFamily, onConcepto, onHoras, onRemove }) {
   const lista = f.family === "auxiliar" ? opciones.auxiliares : opciones.proyectos;
+  const listaTodos = f.family === "auxiliar" ? opciones.auxiliaresTodos : opciones.proyectosTodos;
+  const listaFinal = lista.some((o) => o.id === f.projectId) ? lista : [...lista, ...(listaTodos || []).filter((o) => o.id === f.projectId)];
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
       {mostrarToggleFamilia && <FamilyToggle family={f.family} setFamily={onFamily} />}
       <select className="input" style={{ flex: 1, minWidth: 170 }} value={f.projectId} onChange={(e) => onConcepto(e.target.value)}>
-        {lista.map((o) => <option key={o.id} value={o.id} style={o.fixed ? estiloOpcionFija : undefined}>{o.name}</option>)}
+        {listaFinal.map((o) => <option key={o.id} value={o.id} style={!o.visible ? { color: "var(--warn)" } : (o.fixed ? estiloOpcionFija : undefined)}>{o.name}{!o.visible ? " (oculto)" : ""}</option>)}
       </select>
       <input className="input mono" style={{ width: 92 }} type="number" step="0.25" min="0" max={cap || 24} placeholder="h" value={f.hours} onChange={(e) => onHoras(e.target.value)} />
       <button className="btn btn-danger btn-sm" onClick={onRemove}><Trash2 size={14} /></button>
@@ -572,14 +577,14 @@ function ImputacionHoras({ api, user, config, showToast }) {
   const [historial, setHistorial] = useState([]);
   const [estadoEspecial, setEstadoEspecial] = useState(null); // null | "Baja médica" | "Asuntos propios"
   const [dirty, setDirty] = useState(false);
-  const { proyectos, auxiliares, especiales } = useMemo(() => opcionesDe(config, user), [config, user]);
-  const opciones = { proyectos, auxiliares };
+  const { proyectos, auxiliares, especiales, proyectosTodos, auxiliaresTodos } = useMemo(() => opcionesDe(config, user), [config, user]);
+  const opciones = { proyectos, auxiliares, proyectosTodos, auxiliaresTodos };
   const esFabrica = user.role === "fabrica" && auxiliares.length > 0;
   const cap = dailyCap(fecha);
 
-  const idsAuxiliares = useMemo(() => new Set(auxiliares.map((a) => a.id)), [auxiliares]);
+  const idsAuxiliares = useMemo(() => new Set(auxiliaresTodos.map((a) => a.id)), [auxiliaresTodos]);
   const familiaDe = (projectId) => (idsAuxiliares.has(projectId) ? "auxiliar" : "proyectos");
-  const resolverNombre = (family, id) => (family === "auxiliar" ? auxiliares : proyectos).find((o) => o.id === id)?.name || "—";
+  const resolverNombre = (family, id) => (family === "auxiliar" ? auxiliaresTodos : proyectosTodos).find((o) => o.id === id)?.name || "—";
 
   // Conceptos usados más recientemente por este trabajador, para el modo rápido
   const recientesDe = (lista, idsSet) => {
@@ -799,6 +804,62 @@ const AMBITO_LABEL = { nacional: "Nacional", autonomico: "Autonómico", local: "
 const COLOR_FESTIVO_AMBITO = { nacional: "#C1440E", autonomico: "#B98A2E", local: "#6B5B45" };
 const colorDeEvento = (e) => (e.type === "festivo" ? (COLOR_FESTIVO_AMBITO[e.festivoScope] || COLOR_FESTIVO_AMBITO.nacional) : TIPO_EVENTO[e.type].color);
 
+const DIAS_CORTOS = ["L", "M", "X", "J", "V"];
+
+function VistaQuincenal({ events, setDiaSel }) {
+  const lunes = useMemo(() => {
+    const dt = new Date();
+    const wd = (dt.getDay() + 6) % 7;
+    dt.setDate(dt.getDate() - wd); dt.setHours(0, 0, 0, 0);
+    return dt;
+  }, []);
+  const dias = useMemo(() => {
+    const arr = [];
+    for (let i = 0; i < 14; i++) {
+      const dt = new Date(lunes); dt.setDate(lunes.getDate() + i);
+      if (((dt.getDay() + 6) % 7) <= 4) arr.push(dt);
+    }
+    return arr;
+  }, [lunes]);
+  const eventosDe = (iso) => events.filter((e) => e.date === iso);
+
+  const renderSemana = (dias5, etiqueta) => (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>{etiqueta}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 6 }}>
+        {dias5.map((dt) => {
+          const iso = toISODate(dt);
+          const evs = eventosDe(iso);
+          const esHoy = iso === todayISO();
+          const diaCompletoEv = evs.find((e) => e.type === "vacaciones") || evs.find((e) => e.type === "festivo" && (e.festivoScope === "nacional" || e.festivoScope === "autonomico"));
+          const colorFondo = diaCompletoEv ? colorDeEvento(diaCompletoEv) : null;
+          const otros = evs.filter((e) => e !== diaCompletoEv);
+          return (
+            <div key={iso} onClick={() => setDiaSel(iso)} style={{ border: esHoy ? "2px solid var(--primary)" : "1px solid var(--line)", borderRadius: 8, padding: 6, minHeight: 118, background: colorFondo ? colorFondo + "22" : "#fff", cursor: "pointer", display: "flex", flexDirection: "column", gap: 4, overflow: "hidden" }}>
+              <div className="mono" style={{ fontSize: 10.5, color: "var(--muted)" }}>{DIAS_CORTOS[(dt.getDay() + 6) % 7]} {dt.getDate()}</div>
+              {diaCompletoEv && <div style={{ fontSize: 10.5, fontWeight: 700, color: colorFondo, lineHeight: 1.2 }}>{diaCompletoEv.title || TIPO_EVENTO[diaCompletoEv.type].label}</div>}
+              {otros.slice(0, 3).map((e) => (
+                <div key={e.id} style={{ fontSize: 10, borderRadius: 4, padding: "2px 4px", background: colorDeEvento(e) + "1f", color: colorDeEvento(e), lineHeight: 1.25 }}>
+                  {e.time ? e.time + " " : ""}{e.title || TIPO_EVENTO[e.type].label}
+                </div>
+              ))}
+              {otros.length > 3 && <div style={{ fontSize: 9.5, color: "var(--muted)" }}>+{otros.length - 3} más</div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="card">
+      <h3 style={{ fontSize: 15, marginBottom: 12 }}>Esta semana y la siguiente</h3>
+      {renderSemana(dias.slice(0, 5), "Esta semana")}
+      {renderSemana(dias.slice(5, 10), "Semana que viene")}
+    </div>
+  );
+}
+
 function Calendario({ api, user, events, refreshEvents, config }) {
   const [cursor, setCursor] = useState(new Date());
   const [diaSel, setDiaSel] = useState(null);
@@ -816,7 +877,9 @@ function Calendario({ api, user, events, refreshEvents, config }) {
   const eventosDe = (iso) => events.filter((e) => e.date === iso);
 
   return (
-    <div className="layout-cal">
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <VistaQuincenal events={events} setDiaSel={setDiaSel} />
+      <div className="layout-cal">
       <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <button className="btn btn-ghost btn-sm" onClick={() => setCursor(new Date(year, month - 1, 1))}><ChevronLeft size={14} /></button>
@@ -890,6 +953,7 @@ function Calendario({ api, user, events, refreshEvents, config }) {
           onDelete={async (id) => { await api("DELETE", "/api/events/" + id); refreshEvents(); }}
         />
       )}
+      </div>
     </div>
   );
 }
@@ -1060,7 +1124,7 @@ function Admin({ api, config, refreshConfig, showToast, isAdmin, puedeProyectos,
           <button key={k} className={`btn btn-sm ${sub === k ? "btn-primary" : "btn-ghost"}`} onClick={() => setSub(k)}>{icon}{label}</button>
         ))}
       </div>
-      {sub === "informes" && isAdmin && <Informes api={api} />}
+      {sub === "informes" && isAdmin && <Informes api={api} showToast={showToast} />}
       {sub === "usuarios" && isAdmin && <GestionUsuarios api={api} refreshConfig={refreshConfig} showToast={showToast} />}
       {sub === "proyectos" && puedeProyectos && <GestionFamilia api={api} config={config} refreshConfig={refreshConfig} showToast={showToast} familia="proyectos" />}
       {sub === "auxiliar" && puedeAuxiliar && <GestionFamilia api={api} config={config} refreshConfig={refreshConfig} showToast={showToast} familia="auxiliares" />}
@@ -1069,7 +1133,79 @@ function Admin({ api, config, refreshConfig, showToast, isAdmin, puedeProyectos,
   );
 }
 
-function Informes({ api }) {
+const MESES_CORTOS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+
+function formatoHMS(ms) {
+  if (ms == null || ms < 0) ms = 0;
+  const totalSeg = Math.round(ms / 1000);
+  const h = Math.floor(totalSeg / 3600);
+  const m = Math.floor((totalSeg % 3600) / 60);
+  const s = totalSeg % 60;
+  return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+// Por cada trabajador y día: primera entrada / última salida y las horas
+// resultantes. Se usa tanto para el mes seleccionado como para el acumulado anual.
+function calcularHorasPorFichajes(fichajesArr) {
+  const porClave = {};
+  fichajesArr.forEach((f) => { const k = f.userId + "|" + f.date; (porClave[k] = porClave[k] || []).push(f); });
+  const resultado = {};
+  Object.entries(porClave).forEach(([clave, regs]) => {
+    const entradas = regs.filter((r) => r.type === "entrada").sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
+    const salidas = regs.filter((r) => r.type === "salida").sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
+    if (!entradas.length || !salidas.length) return;
+    const primeraEntrada = entradas[0];
+    const ultimaSalida = salidas[salidas.length - 1];
+    const msTotal = new Date(ultimaSalida.timestamp) - new Date(primeraEntrada.timestamp);
+    if (msTotal <= 0) return;
+    let msTrabajado = msTotal;
+    if (primeraEntrada.time < "10:00:00" && ultimaSalida.time > "10:00:00") msTrabajado -= 30 * 60000;
+    if (primeraEntrada.time < "14:00:00" && ultimaSalida.time > "15:00:00") msTrabajado -= 60 * 60000;
+    if (msTrabajado < 0) msTrabajado = 0;
+    resultado[clave] = { msTotal, msTrabajado, horasTrabajadasDecimal: Math.round((msTrabajado / 3600000) * 100) / 100, idUltimo: ultimaSalida.id };
+  });
+  return resultado;
+}
+
+// Acumulado anual de fichajes: filas = trabajador, columnas = mes (Ene..Dic)
+function pivotFichajesAnual(fichajesArr) {
+  const horas = calcularHorasPorFichajes(fichajesArr);
+  const trabajadores = [...new Set(fichajesArr.map((f) => f.userName))].sort();
+  return trabajadores.map((nombre) => {
+    const fila = { Trabajador: nombre };
+    const totalesMes = new Array(12).fill(0);
+    Object.entries(horas).forEach(([clave, datos]) => {
+      const [userId, fecha] = clave.split("|");
+      const registro = fichajesArr.find((f) => f.userId === userId && f.date === fecha);
+      if (!registro || registro.userName !== nombre) return;
+      const mes = parseInt(fecha.split("-")[1], 10) - 1;
+      totalesMes[mes] += datos.msTrabajado;
+    });
+    let totalAnio = 0;
+    MESES_CORTOS.forEach((m, i) => { fila[m] = totalesMes[i] > 0 ? formatoHMS(totalesMes[i]) : ""; totalAnio += totalesMes[i]; });
+    fila["Total"] = formatoHMS(totalAnio);
+    return fila;
+  });
+}
+
+// Acumulado anual de imputación: filas = concepto, columnas = trabajador (todo el año)
+function pivotPorConceptoDe(imputacionesArr) {
+  const conceptos = [...new Set(imputacionesArr.map((i) => i.projectName))].sort();
+  const trabajadores = [...new Set(imputacionesArr.map((i) => i.userName))].sort();
+  return conceptos.map((concepto) => {
+    const fila = { Concepto: concepto };
+    let total = 0;
+    trabajadores.forEach((t) => {
+      const suma = imputacionesArr.filter((i) => i.projectName === concepto && i.userName === t).reduce((s, i) => s + i.hours, 0);
+      fila[t] = suma > 0 ? suma : "";
+      total += suma;
+    });
+    fila["Total"] = total;
+    return fila;
+  });
+}
+
+function Informes({ api, showToast }) {
   const [desde, setDesde] = useState(toISODate(new Date(new Date().getFullYear(), new Date().getMonth(), 1)));
   const [hasta, setHasta] = useState(todayISO());
   const [fichajes, setFichajes] = useState([]);
@@ -1111,94 +1247,90 @@ function Informes({ api }) {
     return filas;
   };
 
-  const pivotPorConcepto = () => {
-    const conceptos = [...new Set(imputaciones.map((i) => i.projectName))].sort();
-    const trabajadores = [...new Set(imputaciones.map((i) => i.userName))].sort();
-    return conceptos.map((concepto) => {
-      const fila = { Concepto: concepto };
-      let total = 0;
-      trabajadores.forEach((t) => {
-        const suma = imputaciones.filter((i) => i.projectName === concepto && i.userName === t).reduce((s, i) => s + i.hours, 0);
-        fila[t] = suma > 0 ? suma : "";
-        total += suma;
-      });
-      fila["Total"] = total;
-      return fila;
-    });
-  };
+  const pivotPorConcepto = () => pivotPorConceptoDe(imputaciones);
 
-  // Por cada trabajador y día: hora del primer fichaje, hora del último, y las
-  // horas resultantes. "Horas totales trabajadas" resta siempre 30 min (almuerzo)
-  // y, de lunes a jueves, resta también 1h más (la comida de mediodía).
-  const formatoHMS = (ms) => {
-    if (ms == null || ms < 0) ms = 0;
-    const totalSeg = Math.round(ms / 1000);
-    const h = Math.floor(totalSeg / 3600);
-    const m = Math.floor((totalSeg % 3600) / 60);
-    const s = totalSeg % 60;
-    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  };
-
-  const horasPorFichajes = useMemo(() => {
-    const porClave = {};
-    fichajes.forEach((f) => { const k = f.userId + "|" + f.date; (porClave[k] = porClave[k] || []).push(f); });
-    const resultado = {}; // clave "userId|date" -> { msTotal, msTrabajado, horasTrabajadasDecimal, idUltimo }
-    Object.entries(porClave).forEach(([clave, regs]) => {
-      const entradas = regs.filter((r) => r.type === "entrada").sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
-      const salidas = regs.filter((r) => r.type === "salida").sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
-      if (!entradas.length || !salidas.length) return;
-      const primeraEntrada = entradas[0];
-      const ultimaSalida = salidas[salidas.length - 1];
-      const msTotal = new Date(ultimaSalida.timestamp) - new Date(primeraEntrada.timestamp);
-      if (msTotal <= 0) return;
-      let msTrabajado = msTotal;
-      // Solo se descuenta cada descanso si el periodo trabajado lo atraviesa de verdad
-      if (primeraEntrada.time < "10:00:00" && ultimaSalida.time > "10:00:00") msTrabajado -= 30 * 60000;
-      if (primeraEntrada.time < "14:00:00" && ultimaSalida.time > "15:00:00") msTrabajado -= 60 * 60000;
-      if (msTrabajado < 0) msTrabajado = 0;
-      resultado[clave] = { msTotal, msTrabajado, horasTrabajadasDecimal: Math.round((msTrabajado / 3600000) * 100) / 100, idUltimo: ultimaSalida.id };
-    });
-    return resultado;
-  }, [fichajes]);
+  const horasPorFichajes = useMemo(() => calcularHorasPorFichajes(fichajes), [fichajes]);
 
   const pivotFichajesGeneral = () => {
     const dias = diasDelRango();
     const trabajadores = [...new Set(fichajes.map((f) => f.userName))].sort();
     return trabajadores.map((nombre) => {
       const fila = { Trabajador: nombre };
-      let total = 0;
+      let totalMs = 0;
       dias.forEach((f) => {
         const registro = fichajes.find((x) => x.userName === nombre && x.date === f);
         const clave = registro ? registro.userId + "|" + f : null;
-        const horas = clave && horasPorFichajes[clave] ? horasPorFichajes[clave].horasTrabajadasDecimal : 0;
-        fila[claveDia(f)] = horas > 0 ? horas : "";
-        total += horas;
+        const datos = clave && horasPorFichajes[clave];
+        const ms = datos ? datos.msTrabajado : 0;
+        fila[claveDia(f)] = ms > 0 ? formatoHMS(ms) : "";
+        totalMs += ms;
       });
-      fila["Total"] = Math.round(total * 100) / 100;
+      fila["Total"] = formatoHMS(totalMs);
       return fila;
     });
   };
 
-  const exportarExcel = () => {
-    const wb = XLSX.utils.book_new();
-    const wsGeneral = XLSX.utils.json_to_sheet(pivotFichajesGeneral());
-    XLSX.utils.book_append_sheet(wb, wsGeneral, "FICHAJES GENERAL");
-    const wsHorasDia = XLSX.utils.json_to_sheet(pivotHorasPorTrabajador());
-    XLSX.utils.book_append_sheet(wb, wsHorasDia, "Horas por trabajador y día");
-    const wsConcepto = XLSX.utils.json_to_sheet(pivotPorConcepto());
-    XLSX.utils.book_append_sheet(wb, wsConcepto, "Imputación por concepto");
-    const wsFichajes = XLSX.utils.json_to_sheet([...fichajes].sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1)).map((f) => {
-      const clave = f.userId + "|" + f.date;
-      const h = horasPorFichajes[clave];
-      const esUltimo = h && h.idUltimo === f.id;
-      return {
-        Usuario: f.userName, Fecha: f.date, Hora: f.time, Tipo: f.type + (f.automatico ? " (auto)" : ""), Ubicación: f.locationLabel || "",
-        "Horas totales": esUltimo ? formatoHMS(h.msTotal) : "",
-        "Horas totales trabajadas": esUltimo ? formatoHMS(h.msTrabajado) : "",
-      };
-    }));
-    XLSX.utils.book_append_sheet(wb, wsFichajes, "Fichajes");
-    XLSX.writeFile(wb, `informe_${desde}_a_${hasta}.xlsx`);
+  // Pinta de rojo el texto de toda una fila de una hoja (para marcar cierres automáticos)
+  const pintarFilaRoja = (ws, filaIndiceDatos, numCols) => {
+    for (let c = 0; c < numCols; c++) {
+      const addr = XLSX.utils.encode_cell({ r: filaIndiceDatos + 1, c });
+      if (!ws[addr]) ws[addr] = { t: "s", v: "" };
+      ws[addr].s = { font: { color: { rgb: "FFFF0000" } } };
+    }
+  };
+  const conFiltro = (ws) => { if (ws["!ref"]) ws["!autofilter"] = { ref: ws["!ref"] }; return ws; };
+
+  const [exportando, setExportando] = useState(false);
+
+  const exportarExcel = async () => {
+    setExportando(true);
+    try {
+      const anio = new Date(hasta + "T00:00:00").getFullYear();
+      const desdeAnio = `${anio}-01-01`;
+      const hastaAnio = `${anio}-12-31`;
+      const [fichajesAnio, imputacionesAnio] = await Promise.all([
+        api("GET", `/api/fichajes?desde=${desdeAnio}&hasta=${hastaAnio}`),
+        api("GET", `/api/imputaciones/report?desde=${desdeAnio}&hasta=${hastaAnio}`),
+      ]);
+
+      const wb = XLSX.utils.book_new();
+
+      const wsGeneral = conFiltro(XLSX.utils.json_to_sheet(pivotFichajesGeneral()));
+      XLSX.utils.book_append_sheet(wb, wsGeneral, "FICHAJES GENERAL");
+
+      const wsGeneralAnual = conFiltro(XLSX.utils.json_to_sheet(pivotFichajesAnual(fichajesAnio)));
+      XLSX.utils.book_append_sheet(wb, wsGeneralAnual, "FICHAJES GENERAL ACUMULADO");
+
+      const fichajesOrdenados = [...fichajes].sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
+      const filasFichajes = fichajesOrdenados.map((f) => {
+        const clave = f.userId + "|" + f.date;
+        const h = horasPorFichajes[clave];
+        const esUltimo = h && h.idUltimo === f.id;
+        return {
+          Usuario: f.userName, Fecha: f.date, Hora: f.time, Tipo: f.type + (f.automatico ? " (auto)" : ""), Ubicación: f.locationLabel || "",
+          "Horas totales": esUltimo ? formatoHMS(h.msTotal) : "",
+          "Horas totales trabajadas": esUltimo ? formatoHMS(h.msTrabajado) : "",
+        };
+      });
+      const wsFichajes = XLSX.utils.json_to_sheet(filasFichajes);
+      fichajesOrdenados.forEach((f, i) => { if (f.automatico) pintarFilaRoja(wsFichajes, i, 7); });
+      conFiltro(wsFichajes);
+      XLSX.utils.book_append_sheet(wb, wsFichajes, "FICHAJES");
+
+      const wsConcepto = conFiltro(XLSX.utils.json_to_sheet(pivotPorConcepto()));
+      XLSX.utils.book_append_sheet(wb, wsConcepto, "IMPUTACION GENERAL");
+
+      const wsConceptoAnual = conFiltro(XLSX.utils.json_to_sheet(pivotPorConceptoDe(imputacionesAnio)));
+      XLSX.utils.book_append_sheet(wb, wsConceptoAnual, "IMPUTACION GENERAL ACUMULADO");
+
+      const wsHorasDia = conFiltro(XLSX.utils.json_to_sheet(pivotHorasPorTrabajador()));
+      XLSX.utils.book_append_sheet(wb, wsHorasDia, "IMPUTACION HORAS POR DÍA");
+
+      XLSX.writeFile(wb, `informe_${desde}_a_${hasta}.xlsx`);
+    } catch (e) {
+      showToast(e.message || "No se pudo exportar.");
+    }
+    setExportando(false);
   };
   const enviarPorCorreo = () => {
     const cuerpo = encodeURIComponent(`Informe de fichajes e imputaciones (${desde} a ${hasta})\n\nFichajes: ${fichajes.length}\nImputaciones: ${imputaciones.length}\n\nExporta primero a Excel y adjúntalo manualmente.`);
@@ -1219,7 +1351,7 @@ function Informes({ api }) {
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <div><label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>Desde</label><input type="date" className="input mono" style={{ marginTop: 4 }} value={desde} onChange={(e) => setDesde(e.target.value)} /></div>
           <div><label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>Hasta</label><input type="date" className="input mono" style={{ marginTop: 4 }} value={hasta} onChange={(e) => setHasta(e.target.value)} /></div>
-          <button className="btn btn-primary" onClick={exportarExcel} disabled={cargando}><Download size={14} /> Exportar a Excel</button>
+          <button className="btn btn-primary" onClick={exportarExcel} disabled={cargando || exportando}><Download size={14} /> {exportando ? "Exportando…" : "Exportar a Excel"}</button>
           <button className="btn btn-ghost" onClick={enviarPorCorreo}><Mail size={14} /> Enviar por correo</button>
         </div>
       </div>
@@ -1242,6 +1374,37 @@ function Informes({ api }) {
           </tbody></table>
         </div>
       </div>
+
+      <div className="card">
+        <h3 style={{ fontSize: 14, marginBottom: 4 }}>Resumen general — FICHAJES GENERAL</h3>
+        <p style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 0, marginBottom: 10 }}>Horas trabajadas de cada trabajador, día a día (lo mismo que la pestaña del Excel).</p>
+        <TablaPivote datos={pivotFichajesGeneral()} primeraColumna="Trabajador" />
+      </div>
+
+      <div className="card">
+        <h3 style={{ fontSize: 14, marginBottom: 4 }}>Resumen general — IMPUTACION GENERAL</h3>
+        <p style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 0, marginBottom: 10 }}>Horas imputadas por concepto y trabajador (lo mismo que la pestaña del Excel).</p>
+        <TablaPivote datos={pivotPorConcepto()} primeraColumna="Concepto" />
+      </div>
+    </div>
+  );
+}
+
+function TablaPivote({ datos, primeraColumna }) {
+  if (!datos.length) return <div style={{ color: "var(--muted)", fontSize: 13 }}>Sin datos en el periodo.</div>;
+  const columnas = Object.keys(datos[0]);
+  return (
+    <div className="table-wrap scrollbar" style={{ maxHeight: 320, overflowY: "auto" }}>
+      <table>
+        <thead><tr>{columnas.map((c) => <th key={c}>{c}</th>)}</tr></thead>
+        <tbody>
+          {datos.map((fila, i) => (
+            <tr key={i}>
+              {columnas.map((c) => <td key={c} className={c === primeraColumna ? "" : "mono"} style={c === "Total" ? { fontWeight: 700 } : undefined}>{fila[c]}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -1320,6 +1483,7 @@ function GestionFamilia({ api, config, refreshConfig, showToast, familia }) {
     catch (e) { showToast(e.message); }
   };
   const delItem = async (id) => { try { await api("DELETE", `${basePath}/${id}`); refreshConfig(); } catch (e) { showToast(e.message); } };
+  const toggleVisible = async (it) => { try { await api("PATCH", `${basePath}/${it.id}`, { visible: it.visible === false }); refreshConfig(); } catch (e) { showToast(e.message); } };
   const empezarEdicion = (it) => { setEditandoId(it.id); setNombreEdit(it.name); };
   const guardarEdicion = async (id) => {
     if (!nombreEdit.trim()) return;
@@ -1331,7 +1495,7 @@ function GestionFamilia({ api, config, refreshConfig, showToast, familia }) {
     <div className="card">
       <h3 style={{ fontSize: 14, marginBottom: 4 }}>{esProyectos ? "Proyectos — Oficina y Fábrica" : "Trabajos auxiliares — Solo Fábrica"}</h3>
       <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 0, marginBottom: 12 }}>
-        {esProyectos ? "Visible en la imputación de horas de oficina y fábrica." : "Visible solo en la imputación de horas de los trabajadores de fábrica."} Los que aparecen <em>en cursiva</em> son los habituales de siempre.
+        {esProyectos ? "Visible en la imputación de horas de oficina y fábrica." : "Visible solo en la imputación de horas de los trabajadores de fábrica."} Los que aparecen <em>en cursiva</em> son los habituales de siempre. Oculta los que ya no uses (un pedido acabado, por ejemplo) para que no salgan en el desplegable — sin borrarlos, así siguen contando en los informes de meses anteriores.
       </p>
       <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
         <input className="input" style={{ flex: 1, minWidth: 180 }} placeholder="Nombre del nuevo proyecto o trabajo" value={nombre} onChange={(e) => setNombre(e.target.value)} />
@@ -1339,7 +1503,7 @@ function GestionFamilia({ api, config, refreshConfig, showToast, familia }) {
       </div>
       <div className="table-wrap"><table><thead><tr><th>Nombre</th><th></th></tr></thead><tbody>
         {items.map((it) => (
-          <tr key={it.id}>
+          <tr key={it.id} style={it.visible === false ? { opacity: 0.55 } : undefined}>
             {editandoId === it.id ? (
               <td colSpan={2}>
                 <div style={{ display: "flex", gap: 6 }}>
@@ -1350,8 +1514,9 @@ function GestionFamilia({ api, config, refreshConfig, showToast, familia }) {
               </td>
             ) : (
               <>
-                <td style={it.fixed ? estiloOpcionFija : undefined}>{it.name}</td>
+                <td style={it.fixed ? estiloOpcionFija : undefined}>{it.name}{it.visible === false && <span className="pill" style={{ marginLeft: 8, background: "#EEECE6", color: "var(--muted)" }}>Oculto</span>}</td>
                 <td style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                  <button className={`btn btn-sm ${it.visible === false ? "btn-ghost" : "btn-accent"}`} onClick={() => toggleVisible(it)} title={it.visible === false ? "Mostrar en la imputación" : "Ocultar de la imputación"}>{it.visible === false ? "Mostrar" : "Ocultar"}</button>
                   <button className="btn btn-ghost btn-sm" onClick={() => empezarEdicion(it)} title="Editar nombre"><Settings size={13} /></button>
                   <button className="btn btn-danger btn-sm" onClick={() => delItem(it.id)}><Trash2 size={13} /></button>
                 </td>
