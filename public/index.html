@@ -119,9 +119,10 @@ textarea.input{resize:vertical;min-height:70px;}
 .tab{padding:10px 16px;border-radius:9px;font-weight:600;font-size:13.5px;cursor:pointer;display:flex;align-items:center;gap:8px;color:#C9C6BE;}
 .tab.active{background:rgba(255,255,255,0.12);color:#fff;}
 table{width:100%;border-collapse:collapse;font-size:13.5px;table-layout:fixed;}
-th{text-align:left;padding:8px 10px;color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--line);white-space:nowrap;}
-td{padding:9px 10px;border-bottom:1px solid var(--line);}
+th{text-align:left;padding:8px 10px;color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0;}
+td{padding:9px 10px;border-bottom:1px solid var(--line);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:0;}
 .td-clip{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:0;}
+.td-actions{overflow:visible;white-space:normal;max-width:none;}
 ::placeholder{color:#9AA0A6;}
 .scrollbar::-webkit-scrollbar{height:6px;width:6px;}
 .scrollbar::-webkit-scrollbar-thumb{background:#D8D4C9;border-radius:6px;}
@@ -830,11 +831,11 @@ function VistaQuincenal({ events, setDiaSel }) {
           const colorFondo = diaCompletoEv ? colorDeEvento(diaCompletoEv) : null;
           const otros = evs.filter((e) => e !== diaCompletoEv);
           return (
-            <div key={iso} onClick={() => setDiaSel(iso)} style={{ border: esHoy ? "2px solid var(--primary)" : "1px solid var(--line)", borderRadius: 8, padding: 6, minHeight: 118, background: colorFondo ? colorFondo + "22" : "#fff", cursor: "pointer", display: "flex", flexDirection: "column", gap: 4, overflow: "hidden" }}>
+            <div key={iso} onClick={() => setDiaSel(iso)} style={{ border: esHoy ? "2px solid var(--primary)" : "1px solid var(--line)", borderRadius: 8, padding: 6, minHeight: 132, background: colorFondo ? colorFondo + "22" : "#fff", cursor: "pointer", display: "flex", flexDirection: "column", gap: 4, overflow: "hidden" }}>
               <div className="mono" style={{ fontSize: 10.5, color: "var(--muted)" }}>{DIAS_CORTOS[(dt.getDay() + 6) % 7]} {dt.getDate()}</div>
-              {diaCompletoEv && <div style={{ fontSize: 10.5, fontWeight: 700, color: colorFondo, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>{diaCompletoEv.title || TIPO_EVENTO[diaCompletoEv.type].label}</div>}
+              {diaCompletoEv && <div style={{ fontSize: 10.5, fontWeight: 700, color: colorFondo, lineHeight: 1.2, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{diaCompletoEv.title || TIPO_EVENTO[diaCompletoEv.type].label}</div>}
               {otros.slice(0, 3).map((e) => (
-                <div key={e.id} style={{ fontSize: 10, borderRadius: 4, padding: "2px 4px", background: colorDeEvento(e) + "1f", color: colorDeEvento(e), lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>
+                <div key={e.id} style={{ fontSize: 9.5, borderRadius: 4, padding: "2px 4px", background: colorDeEvento(e) + "1f", color: colorDeEvento(e), lineHeight: 1.2, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
                   {e.time ? e.time + " " : ""}{e.title || TIPO_EVENTO[e.type].label}
                 </div>
               ))}
@@ -1220,7 +1221,7 @@ function resumenFichajesPorTrabajador(fichajesArr) {
   });
   return Object.entries(acc)
     .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([nombre, v]) => ({ Trabajador: nombre, "Horas normales": formatoHMS(v.normal), "Horas excedentes": formatoHMS(v.excedente), "Total horas": formatoHMS(v.normal + v.excedente) }));
+    .map(([nombre, v]) => ({ Trabajador: nombre, "Normales": formatoHMS(v.normal), "Excedentes": formatoHMS(v.excedente), "Total": formatoHMS(v.normal + v.excedente) }));
 }
 
 // Resumen simplificado de imputación: filas = concepto, columna = Total horas
@@ -1230,7 +1231,7 @@ function resumenImputacionPorConcepto(imputacionesArr) {
   imputacionesArr.forEach((i) => { acc[i.projectName] = (acc[i.projectName] || 0) + i.hours; });
   return Object.entries(acc)
     .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([concepto, total]) => ({ Concepto: concepto, "Total horas": Math.round(total * 100) / 100 }));
+    .map(([concepto, total]) => ({ Concepto: concepto, "Total": Math.round(total * 100) / 100 }));
 }
 
 function Informes({ api, showToast }) {
@@ -1511,9 +1512,9 @@ function GestionUsuarios({ api, refreshConfig, showToast }) {
                     <div style={{ fontWeight: 600 }}>{u.name}</div>
                     <div style={{ fontSize: 11, color: "var(--muted)" }}>{roleLabels[u.role]} · PIN <span className="mono">{u.pin}</span></div>
                   </td>
-                  <td>{u.role !== "admin" && <button className={`btn btn-sm ${respProy.includes(u.id) ? "btn-accent" : "btn-ghost"}`} onClick={() => toggleRespProy(u.id)} title="Responsable de proyectos"><ShieldCheck size={13} /></button>}</td>
-                  <td>{u.role !== "admin" && <button className={`btn btn-sm ${respAux.includes(u.id) ? "btn-accent" : "btn-ghost"}`} onClick={() => toggleRespAux(u.id)} title="Responsable de auxiliares"><ShieldCheck size={13} /></button>}</td>
-                  <td>{u.role !== "admin" && <button className="btn btn-danger btn-sm" onClick={() => delUser(u.id)} title="Eliminar"><Trash2 size={13} /></button>}</td>
+                  <td className="td-actions">{u.role !== "admin" && <button className={`btn btn-sm ${respProy.includes(u.id) ? "btn-accent" : "btn-ghost"}`} onClick={() => toggleRespProy(u.id)} title="Responsable de proyectos"><ShieldCheck size={13} /></button>}</td>
+                  <td className="td-actions">{u.role !== "admin" && <button className={`btn btn-sm ${respAux.includes(u.id) ? "btn-accent" : "btn-ghost"}`} onClick={() => toggleRespAux(u.id)} title="Responsable de auxiliares"><ShieldCheck size={13} /></button>}</td>
+                  <td className="td-actions">{u.role !== "admin" && <button className="btn btn-danger btn-sm" onClick={() => delUser(u.id)} title="Eliminar"><Trash2 size={13} /></button>}</td>
                 </tr>
               ))}
             </tbody>
@@ -1562,7 +1563,7 @@ function GestionFamilia({ api, config, refreshConfig, showToast, familia }) {
         {items.map((it) => (
           <tr key={it.id} style={it.visible === false ? { opacity: 0.55 } : undefined}>
             {editandoId === it.id ? (
-              <td colSpan={2}>
+              <td className="td-actions" colSpan={2}>
                 <div style={{ display: "flex", gap: 6 }}>
                   <input className="input" style={{ flex: 1 }} value={nombreEdit} onChange={(e) => setNombreEdit(e.target.value)} autoFocus />
                   <button className="btn btn-primary btn-sm" onClick={() => guardarEdicion(it.id)}><Check size={13} /></button>
@@ -1572,7 +1573,7 @@ function GestionFamilia({ api, config, refreshConfig, showToast, familia }) {
             ) : (
               <>
                 <td className="td-clip" style={it.fixed ? estiloOpcionFija : undefined}>{it.name}{it.visible === false && <span className="pill" style={{ marginLeft: 8, background: "#EEECE6", color: "var(--muted)" }}>Oculto</span>}</td>
-                <td style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+                <td className="td-actions" style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
                   <button className={`btn btn-sm ${it.visible === false ? "btn-ghost" : "btn-accent"}`} onClick={() => toggleVisible(it)} title={it.visible === false ? "Mostrar en la imputación" : "Ocultar de la imputación"}>{it.visible === false ? <EyeOff size={13} /> : <Eye size={13} />}</button>
                   <button className="btn btn-ghost btn-sm" onClick={() => empezarEdicion(it)} title="Editar nombre"><Settings size={13} /></button>
                   <button className="btn btn-danger btn-sm" onClick={() => delItem(it.id)}><Trash2 size={13} /></button>
