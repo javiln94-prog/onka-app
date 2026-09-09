@@ -1136,7 +1136,7 @@ function Admin({ api, config, refreshConfig, showToast, isAdmin, puedeProyectos,
           <button key={k} className={`btn btn-sm ${sub === k ? "btn-primary" : "btn-ghost"}`} onClick={() => setSub(k)}>{icon}{label}</button>
         ))}
       </div>
-      {sub === "informes" && isAdmin && <Informes api={api} showToast={showToast} />}
+      {sub === "informes" && isAdmin && <Informes api={api} showToast={showToast} config={config} />}
       {sub === "usuarios" && isAdmin && <GestionUsuarios api={api} refreshConfig={refreshConfig} showToast={showToast} />}
       {sub === "proyectos" && puedeProyectos && <GestionFamilia api={api} config={config} refreshConfig={refreshConfig} showToast={showToast} familia="proyectos" />}
       {sub === "auxiliar" && puedeAuxiliar && <GestionFamilia api={api} config={config} refreshConfig={refreshConfig} showToast={showToast} familia="auxiliares" />}
@@ -1250,7 +1250,7 @@ function resumenImputacionPorConcepto(imputacionesArr) {
     .map(([concepto, total]) => ({ Concepto: concepto, "Total": Math.round(total * 100) / 100 }));
 }
 
-function Informes({ api, showToast }) {
+function Informes({ api, showToast, config }) {
   const [desde, setDesde] = useState(toISODate(new Date(new Date().getFullYear(), new Date().getMonth(), 1)));
   const [hasta, setHasta] = useState(todayISO());
   const [fichajes, setFichajes] = useState([]);
@@ -1258,6 +1258,14 @@ function Informes({ api, showToast }) {
   const [cargando, setCargando] = useState(false);
   const [fichajesAnioActual, setFichajesAnioActual] = useState([]);
   const [imputAnioActual, setImputAnioActual] = useState([]);
+  const [empresaFiltro, setEmpresaFiltro] = useState("todas"); // "todas" | "ONKA" | "ALACANT"
+
+  const empresaDeUsuario = useMemo(() => {
+    const map = {};
+    (config?.users || []).forEach((u) => { map[u.id] = u.company || "ONKA"; });
+    return map;
+  }, [config]);
+  const filtrarEmpresa = useCallback((arr) => (empresaFiltro === "todas" ? arr : arr.filter((x) => empresaDeUsuario[x.userId] === empresaFiltro)), [empresaFiltro, empresaDeUsuario]);
 
   const cargar = useCallback(() => {
     setCargando(true);
@@ -1274,9 +1282,14 @@ function Informes({ api, showToast }) {
     ]).then(([f, i]) => { setFichajesAnioActual(f); setImputAnioActual(i); }).catch(() => {});
   }, [api]);
 
+  const fichajesF = useMemo(() => filtrarEmpresa(fichajes), [fichajes, filtrarEmpresa]);
+  const imputacionesF = useMemo(() => filtrarEmpresa(imputaciones), [imputaciones, filtrarEmpresa]);
+  const fichajesAnioActualF = useMemo(() => filtrarEmpresa(fichajesAnioActual), [fichajesAnioActual, filtrarEmpresa]);
+  const imputAnioActualF = useMemo(() => filtrarEmpresa(imputAnioActual), [imputAnioActual, filtrarEmpresa]);
+
   const mesActualISO = todayISO().slice(0, 7);
-  const fichajesMesActual = useMemo(() => fichajesAnioActual.filter((f) => f.date.slice(0, 7) === mesActualISO), [fichajesAnioActual, mesActualISO]);
-  const imputMesActual = useMemo(() => imputAnioActual.filter((i) => i.date.slice(0, 7) === mesActualISO), [imputAnioActual, mesActualISO]);
+  const fichajesMesActual = useMemo(() => fichajesAnioActualF.filter((f) => f.date.slice(0, 7) === mesActualISO), [fichajesAnioActualF, mesActualISO]);
+  const imputMesActual = useMemo(() => imputAnioActualF.filter((i) => i.date.slice(0, 7) === mesActualISO), [imputAnioActualF, mesActualISO]);
 
   const diasDelRango = () => {
     const dias = [];
@@ -1289,14 +1302,14 @@ function Informes({ api, showToast }) {
 
   const pivotHorasPorTrabajador = () => {
     const dias = diasDelRango();
-    const trabajadores = [...new Set(imputaciones.map((i) => i.userName))].sort();
+    const trabajadores = [...new Set(imputacionesF.map((i) => i.userName))].sort();
     const filas = [];
     trabajadores.forEach((nombre) => {
       [["normal", "Horas normales"], ["excedente", "Horas excedentes"]].forEach(([tipo, etiqueta]) => {
         const fila = { Trabajador: nombre, Tipo: etiqueta };
         let total = 0;
         dias.forEach((f) => {
-          const suma = imputaciones.filter((i) => i.userName === nombre && i.date === f && (tipo === "excedente" ? i.excedente : !i.excedente)).reduce((s, i) => s + i.hours, 0);
+          const suma = imputacionesF.filter((i) => i.userName === nombre && i.date === f && (tipo === "excedente" ? i.excedente : !i.excedente)).reduce((s, i) => s + i.hours, 0);
           if (suma > 0) { fila[claveDia(f)] = suma; total += suma; } else { fila[claveDia(f)] = ""; }
         });
         fila["Total"] = total;
@@ -1306,18 +1319,18 @@ function Informes({ api, showToast }) {
     return filas;
   };
 
-  const pivotPorConcepto = () => pivotPorConceptoDe(imputaciones);
+  const pivotPorConcepto = () => pivotPorConceptoDe(imputacionesF);
 
-  const horasPorFichajes = useMemo(() => calcularHorasPorFichajes(fichajes), [fichajes]);
+  const horasPorFichajes = useMemo(() => calcularHorasPorFichajes(fichajesF), [fichajesF]);
 
   const pivotFichajesGeneral = () => {
     const dias = diasDelRango();
-    const trabajadores = [...new Set(fichajes.map((f) => f.userName))].sort();
+    const trabajadores = [...new Set(fichajesF.map((f) => f.userName))].sort();
     return trabajadores.map((nombre) => {
       const fila = { Trabajador: nombre };
       let totalMs = 0;
       dias.forEach((f) => {
-        const registro = fichajes.find((x) => x.userName === nombre && x.date === f);
+        const registro = fichajesF.find((x) => x.userName === nombre && x.date === f);
         const clave = registro ? registro.userId + "|" + f : null;
         const datos = clave && horasPorFichajes[clave];
         const ms = datos ? datos.msTrabajado : 0;
@@ -1347,10 +1360,12 @@ function Informes({ api, showToast }) {
       const anio = new Date(hasta + "T00:00:00").getFullYear();
       const desdeAnio = `${anio}-01-01`;
       const hastaAnio = `${anio}-12-31`;
-      const [fichajesAnio, imputacionesAnio] = await Promise.all([
+      const [fichajesAnioRaw, imputacionesAnioRaw] = await Promise.all([
         api("GET", `/api/fichajes?desde=${desdeAnio}&hasta=${hastaAnio}`),
         api("GET", `/api/imputaciones/report?desde=${desdeAnio}&hasta=${hastaAnio}`),
       ]);
+      const fichajesAnio = filtrarEmpresa(fichajesAnioRaw);
+      const imputacionesAnio = filtrarEmpresa(imputacionesAnioRaw);
 
       const wb = XLSX.utils.book_new();
 
@@ -1360,7 +1375,7 @@ function Informes({ api, showToast }) {
       const wsGeneralAnual = conFiltro(XLSX.utils.json_to_sheet(pivotFichajesAnual(fichajesAnio)));
       XLSX.utils.book_append_sheet(wb, wsGeneralAnual, "FICHAJES GENERAL ACUMULADO");
 
-      const fichajesOrdenados = [...fichajes].sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
+      const fichajesOrdenados = [...fichajesF].sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
       const filasFichajes = fichajesOrdenados.map((f) => {
         const clave = f.userId + "|" + f.date;
         const h = horasPorFichajes[clave];
@@ -1385,24 +1400,25 @@ function Informes({ api, showToast }) {
       const wsHorasDia = conFiltro(XLSX.utils.json_to_sheet(pivotHorasPorTrabajador()));
       XLSX.utils.book_append_sheet(wb, wsHorasDia, "IMPUTACION HORAS POR DÍA");
 
-      XLSX.writeFile(wb, `informe_${desde}_a_${hasta}.xlsx`);
+      const sufijoEmpresa = empresaFiltro === "todas" ? "" : `_${empresaFiltro}`;
+      XLSX.writeFile(wb, `informe_${desde}_a_${hasta}${sufijoEmpresa}.xlsx`);
     } catch (e) {
       showToast(e.message || "No se pudo exportar.");
     }
     setExportando(false);
   };
   const enviarPorCorreo = () => {
-    const cuerpo = encodeURIComponent(`Informe de fichajes e imputaciones (${desde} a ${hasta})\n\nFichajes: ${fichajes.length}\nImputaciones: ${imputaciones.length}\n\nExporta primero a Excel y adjúntalo manualmente.`);
+    const cuerpo = encodeURIComponent(`Informe de fichajes e imputaciones (${desde} a ${hasta})\n\nFichajes: ${fichajesF.length}\nImputaciones: ${imputacionesF.length}\n\nExporta primero a Excel y adjúntalo manualmente.`);
     window.open(`mailto:?subject=${encodeURIComponent("Informe de fichajes e imputaciones")}&body=${cuerpo}`, "_blank");
   };
   const resumenPorUsuario = useMemo(() => {
     const acc = {};
-    imputaciones.forEach((i) => {
+    imputacionesF.forEach((i) => {
       if (!acc[i.userName]) acc[i.userName] = { normal: 0, excedente: 0 };
       acc[i.userName][i.excedente ? "excedente" : "normal"] += i.hours;
     });
     return acc;
-  }, [imputaciones]);
+  }, [imputacionesF]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -1410,6 +1426,14 @@ function Informes({ api, showToast }) {
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <div><label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>Desde</label><input type="date" className="input mono" style={{ marginTop: 4 }} value={desde} onChange={(e) => setDesde(e.target.value)} /></div>
           <div><label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>Hasta</label><input type="date" className="input mono" style={{ marginTop: 4 }} value={hasta} onChange={(e) => setHasta(e.target.value)} /></div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>Empresa</label>
+            <select className="input" style={{ marginTop: 4 }} value={empresaFiltro} onChange={(e) => setEmpresaFiltro(e.target.value)}>
+              <option value="todas">Todas las empresas</option>
+              <option value="ONKA">Solo ONKA</option>
+              <option value="ALACANT">Solo Alacant Contract</option>
+            </select>
+          </div>
           <button className="btn btn-primary" onClick={exportarExcel} disabled={cargando || exportando}><Download size={14} /> {exportando ? "Exportando…" : "Exportar a Excel"}</button>
           <button className="btn btn-ghost" onClick={enviarPorCorreo}><Mail size={14} /> Enviar por correo</button>
         </div>
@@ -1422,10 +1446,10 @@ function Informes({ api, showToast }) {
         </tbody></table></div>
       </div>
       <div className="card">
-        <h3 style={{ fontSize: 14, marginBottom: 10 }}>Fichajes del periodo ({fichajes.length})</h3>
+        <h3 style={{ fontSize: 14, marginBottom: 10 }}>Fichajes del periodo ({fichajesF.length})</h3>
         <div className="table-wrap scrollbar" style={{ maxHeight: 320, overflowY: "auto" }}>
           <table><thead><tr><th>Usuario</th><th>Fecha</th><th>Hora</th><th>Tipo</th><th>Ubicación</th></tr></thead><tbody>
-            {[...fichajes].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1)).map((f) => (
+            {[...fichajesF].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1)).map((f) => (
               <tr key={f.id}><td>{f.userName}</td><td className="mono">{f.date}</td><td className="mono">{f.time.slice(0, 5)}</td>
               <td><span className="pill" style={{ background: f.type === "entrada" ? "#E7F3EC" : "#FBEAEA", color: f.type === "entrada" ? "var(--ok)" : "var(--warn)" }}>{f.type}{f.automatico ? " · auto" : ""}</span></td>
               <td className="td-clip"><UbicacionCelda f={f} /></td></tr>
@@ -1443,7 +1467,7 @@ function Informes({ api, showToast }) {
       <div className="card">
         <h3 style={{ fontSize: 14, marginBottom: 4 }}>FICHAJES GENERAL — Acumulado del año</h3>
         <p style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 0, marginBottom: 10 }}>Horas acumuladas en {new Date().getFullYear()}, por trabajador.</p>
-        <TablaPivote datos={resumenFichajesPorTrabajador(fichajesAnioActual)} primeraColumna="Trabajador" />
+        <TablaPivote datos={resumenFichajesPorTrabajador(fichajesAnioActualF)} primeraColumna="Trabajador" />
       </div>
 
       <div className="card">
@@ -1455,7 +1479,7 @@ function Informes({ api, showToast }) {
       <div className="card">
         <h3 style={{ fontSize: 14, marginBottom: 4 }}>IMPUTACION GENERAL — Acumulado del año</h3>
         <p style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 0, marginBottom: 10 }}>Horas imputadas en {new Date().getFullYear()}, por concepto.</p>
-        <TablaPivote datos={resumenImputacionPorConcepto(imputAnioActual)} primeraColumna="Concepto" />
+        <TablaPivote datos={resumenImputacionPorConcepto(imputAnioActualF)} primeraColumna="Concepto" />
       </div>
     </div>
   );
@@ -1487,6 +1511,7 @@ function GestionUsuarios({ api, refreshConfig, showToast }) {
   const [nombre, setNombre] = useState("");
   const [role, setRole] = useState("oficina");
   const [pin, setPin] = useState("1234");
+  const [company, setCompany] = useState("ONKA");
 
   const cargar = useCallback(() => {
     api("GET", "/api/users").then(setUsuarios).catch(() => {});
@@ -1494,12 +1519,15 @@ function GestionUsuarios({ api, refreshConfig, showToast }) {
   }, [api]);
   useEffect(() => { cargar(); }, [cargar]);
 
-  const addUser = async () => { if (!nombre.trim()) return; await api("POST", "/api/users", { name: nombre.trim(), role, pin }); setNombre(""); cargar(); refreshConfig(); showToast("Trabajador añadido."); };
+  const addUser = async () => { if (!nombre.trim()) return; await api("POST", "/api/users", { name: nombre.trim(), role, pin, company }); setNombre(""); cargar(); refreshConfig(); showToast("Trabajador añadido."); };
   const delUser = async (id) => { await api("DELETE", "/api/users/" + id); cargar(); refreshConfig(); };
   const toggleRespProy = async (id) => { await api("PATCH", `/api/users/${id}/responsable-proyecto`); cargar(); refreshConfig(); };
   const toggleRespAux = async (id) => { await api("PATCH", `/api/users/${id}/responsable-auxiliar`); cargar(); refreshConfig(); };
+  const cambiarEmpresa = async (id, nuevaEmpresa) => { await api("PATCH", `/api/users/${id}`, { company: nuevaEmpresa }); cargar(); refreshConfig(); };
 
   const roleLabels = { admin: "Administrador", oficina: "Oficina", fabrica: "Fábrica" };
+  const empresaLabels = { ONKA: "ONKA", ALACANT: "Alacant Contract" };
+  const empresaColor = { ONKA: "var(--primary)", ALACANT: "var(--accent-ink)" };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -1507,10 +1535,14 @@ function GestionUsuarios({ api, refreshConfig, showToast }) {
         <h3 style={{ fontSize: 14, marginBottom: 10 }}>Nuevo trabajador</h3>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <input className="input" style={{ flex: 2, minWidth: 160 }} placeholder="Nombre" value={nombre} onChange={(e) => setNombre(e.target.value)} />
-          <select className="input" style={{ flex: 1, minWidth: 160 }} value={role} onChange={(e) => setRole(e.target.value)}>
+          <select className="input" style={{ flex: 1, minWidth: 140 }} value={role} onChange={(e) => setRole(e.target.value)}>
             <option value="oficina">Oficina</option>
             <option value="fabrica">Fábrica</option>
             <option value="admin">Administrador</option>
+          </select>
+          <select className="input" style={{ flex: 1, minWidth: 150 }} value={company} onChange={(e) => setCompany(e.target.value)}>
+            <option value="ONKA">Empresa: ONKA</option>
+            <option value="ALACANT">Empresa: Alacant Contract</option>
           </select>
           <input className="input mono" style={{ width: 90 }} placeholder="PIN" value={pin} onChange={(e) => setPin(e.target.value)} />
           <button className="btn btn-primary" onClick={addUser}><Plus size={14} /> Añadir</button>
@@ -1523,17 +1555,26 @@ function GestionUsuarios({ api, refreshConfig, showToast }) {
             <div key={u.id} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{u.name}</div>
+                  <div style={{ fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    {u.name}
+                    <span className="pill" style={{ background: (empresaColor[u.company] || "var(--muted)") + "18", color: empresaColor[u.company] || "var(--muted)" }}>{empresaLabels[u.company] || "ONKA"}</span>
+                  </div>
                   <div style={{ fontSize: 12, color: "var(--muted)" }}>{roleLabels[u.role]} · PIN <span className="mono">{u.pin}</span></div>
                 </div>
                 {u.role !== "admin" && <button className="btn btn-danger btn-sm" style={{ flexShrink: 0 }} onClick={() => delUser(u.id)} title="Eliminar"><Trash2 size={13} /></button>}
               </div>
-              {u.role !== "admin" && (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-                  <button className={`btn btn-sm ${respProy.includes(u.id) ? "btn-accent" : "btn-ghost"}`} onClick={() => toggleRespProy(u.id)}><ShieldCheck size={13} /> Resp. proyectos</button>
-                  <button className={`btn btn-sm ${respAux.includes(u.id) ? "btn-accent" : "btn-ghost"}`} onClick={() => toggleRespAux(u.id)}><ShieldCheck size={13} /> Resp. auxiliares</button>
-                </div>
-              )}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10, alignItems: "center" }}>
+                <select className="input" style={{ width: "auto", fontSize: 12.5, padding: "6px 8px" }} value={u.company || "ONKA"} onChange={(e) => cambiarEmpresa(u.id, e.target.value)}>
+                  <option value="ONKA">Empresa: ONKA</option>
+                  <option value="ALACANT">Empresa: Alacant Contract</option>
+                </select>
+                {u.role !== "admin" && (
+                  <>
+                    <button className={`btn btn-sm ${respProy.includes(u.id) ? "btn-accent" : "btn-ghost"}`} onClick={() => toggleRespProy(u.id)}><ShieldCheck size={13} /> Resp. proyectos</button>
+                    <button className={`btn btn-sm ${respAux.includes(u.id) ? "btn-accent" : "btn-ghost"}`} onClick={() => toggleRespAux(u.id)}><ShieldCheck size={13} /> Resp. auxiliares</button>
+                  </>
+                )}
+              </div>
             </div>
           ))}
         </div>
