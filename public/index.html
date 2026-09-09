@@ -304,10 +304,26 @@ function Login({ onLogin }) {
         }
         return data;
       })
-      .then((list) => { setUsers(list); if (list.length) setSelected(list[0].id); })
+      .then((list) => {
+        setUsers(list);
+        const ultimo = storage.get("onka_last_user");
+        const idAUsar = ultimo && list.some((u) => u.id === ultimo) ? ultimo : (list[0] && list[0].id);
+        if (idAUsar) {
+          setSelected(idAUsar);
+          const pinGuardado = storage.get("onka_pin_" + idAUsar);
+          if (pinGuardado) setPin(pinGuardado);
+        }
+      })
       .catch((e) => setError(e.message || "No se pudo conectar con el servidor."));
     fetch("/api/frase-actual").then((r) => r.json()).then((d) => setFrase(d.texto || null)).catch(() => {});
   }, []);
+
+  const cambiarUsuario = (id) => {
+    setSelected(id);
+    setError("");
+    const pinGuardado = storage.get("onka_pin_" + id);
+    setPin(pinGuardado || "");
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -317,6 +333,8 @@ function Login({ onLogin }) {
       const r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: selected, pin }) });
       const data = await r.json();
       if (!r.ok) { setError(data.error || "Error de acceso"); setBusy(false); return; }
+      storage.set("onka_last_user", selected);
+      storage.set("onka_pin_" + selected, pin);
       onLogin(data.user, data.token);
     } catch (e) { setError("No se pudo conectar con el servidor."); }
     setBusy(false);
@@ -333,7 +351,7 @@ function Login({ onLogin }) {
         <h2 style={{ fontSize: 18, marginBottom: 4, color: "#fff" }}>Identifícate</h2>
         <p style={{ color: "#9A978E", fontSize: 13, marginTop: 4, marginBottom: 16 }}>Selecciona tu usuario para fichar, imputar horas o ver el calendario.</p>
         <label style={{ fontSize: 12.5, fontWeight: 600, color: "#9A978E" }}>Usuario</label>
-        <select className="input" style={{ marginTop: 6, marginBottom: 12 }} value={selected} onChange={(e) => { setSelected(e.target.value); setError(""); }}>
+        <select className="input" style={{ marginTop: 6, marginBottom: 12 }} value={selected} onChange={(e) => cambiarUsuario(e.target.value)}>
           {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select>
         <label style={{ fontSize: 12.5, fontWeight: 600, color: "#9A978E" }}>PIN</label>
@@ -551,14 +569,19 @@ function FamilyToggle({ family, setFamily }) {
 }
 
 function FilaImputacion({ f, opciones, mostrarToggleFamilia, cap, onFamily, onConcepto, onHoras, onRemove }) {
-  const lista = f.family === "auxiliar" ? opciones.auxiliares : opciones.proyectos;
-  const listaTodos = f.family === "auxiliar" ? opciones.auxiliaresTodos : opciones.proyectosTodos;
-  const listaFinal = lista.some((o) => o.id === f.projectId) ? lista : [...lista, ...(listaTodos || []).filter((o) => o.id === f.projectId)];
+  const listaFamilia = f.family === "auxiliar" ? opciones.auxiliares : opciones.proyectos;
+  const listaFamiliaTodos = f.family === "auxiliar" ? opciones.auxiliaresTodos : opciones.proyectosTodos;
+  const esRecurrente = f.tipo === "recurrente";
+  const lista = listaFamilia.filter((o) => !!o.fixed === esRecurrente);
+  const listaTodos = (listaFamiliaTodos || []).filter((o) => !!o.fixed === esRecurrente);
+  const listaFinal = lista.some((o) => o.id === f.projectId) ? lista : [...lista, ...listaTodos.filter((o) => o.id === f.projectId)];
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
       {mostrarToggleFamilia && <FamilyToggle family={f.family} setFamily={onFamily} />}
-      <select className="input" style={{ flex: 1, minWidth: 170 }} value={f.projectId} onChange={(e) => onConcepto(e.target.value)}>
-        {listaFinal.map((o) => <option key={o.id} value={o.id} style={!o.visible ? { color: "var(--warn)" } : (o.fixed ? estiloOpcionFija : undefined)}>{o.name}{!o.visible ? " (oculto)" : ""}</option>)}
+      <span className="pill" style={{ background: esRecurrente ? "#EAE6DF" : "#E8F0F8", color: esRecurrente ? "var(--muted)" : "var(--office)", flexShrink: 0 }}>{esRecurrente ? "Recurrente" : "Pedido"}</span>
+      <select className="input" style={{ flex: 1, minWidth: 150 }} value={f.projectId} onChange={(e) => onConcepto(e.target.value)}>
+        {listaFinal.length === 0 && <option value="">— sin {esRecurrente ? "recurrentes" : "pedidos"} —</option>}
+        {listaFinal.map((o) => <option key={o.id} value={o.id} style={!o.visible ? { color: "var(--warn)" } : undefined}>{o.name}{!o.visible ? " (oculto)" : ""}</option>)}
       </select>
       <input className="input mono" style={{ width: 92 }} type="number" step="0.25" min="0" max={cap || 24} placeholder="h" value={f.hours} onChange={(e) => onHoras(e.target.value)} />
       <button className="btn btn-danger btn-sm" onClick={onRemove}><Trash2 size={14} /></button>
@@ -581,23 +604,16 @@ function ImputacionHoras({ api, user, config, showToast }) {
   const idsAuxiliares = useMemo(() => new Set(auxiliaresTodos.map((a) => a.id)), [auxiliaresTodos]);
   const familiaDe = (projectId) => (idsAuxiliares.has(projectId) ? "auxiliar" : "proyectos");
   const resolverNombre = (family, id) => (family === "auxiliar" ? auxiliaresTodos : proyectosTodos).find((o) => o.id === id)?.name || "—";
-
-  // Conceptos usados más recientemente por este trabajador, para el modo rápido
-  const recientesDe = (lista, idsSet) => {
-    const vistos = [];
-    for (const h of historial) {
-      if (!idsSet.has(h.projectId) || vistos.includes(h.projectId)) continue;
-      vistos.push(h.projectId);
-      if (vistos.length >= 3) break;
-    }
-    const items = vistos.map((id) => lista.find((o) => o.id === id)).filter(Boolean);
-    return items.length ? items : lista.slice(0, 3);
+  const tipoDe = (family, id) => {
+    const item = (family === "auxiliar" ? auxiliaresTodos : proyectosTodos).find((o) => o.id === id);
+    return item && item.fixed ? "recurrente" : "pedido";
   };
-  const idsProyectos = useMemo(() => new Set(proyectos.map((p) => p.id)), [proyectos]);
-  const recientesProyectos = useMemo(() => recientesDe(proyectos, idsProyectos), [historial, proyectos, idsProyectos]); // eslint-disable-line
-  const recientesAuxiliares = useMemo(() => recientesDe(auxiliares, idsAuxiliares), [historial, auxiliares, idsAuxiliares]); // eslint-disable-line
 
-  const nuevaFila = (family) => ({ id: "n" + Math.random(), family, projectId: (family === "auxiliar" ? auxiliares : proyectos)[0]?.id || "", hours: "" });
+  const nuevaFila = (family, tipo) => {
+    const listaFamilia = family === "auxiliar" ? auxiliares : proyectos;
+    const filtrada = listaFamilia.filter((o) => !!o.fixed === (tipo === "recurrente"));
+    return { id: "n" + Math.random(), family, tipo, projectId: filtrada[0]?.id || "", hours: "" };
+  };
 
   const cargarDia = useCallback((f) => {
     api("GET", "/api/imputaciones?date=" + f).then((rows) => {
@@ -605,8 +621,8 @@ function ImputacionHoras({ api, user, config, showToast }) {
       const extra = rows.filter((r) => r.excedente);
       const especialEncontrado = principales.length === 1 && CONCEPTOS_ESPECIALES.includes(principales[0].projectName) ? principales[0].projectName : null;
       setEstadoEspecial(especialEncontrado);
-      setFilas(!especialEncontrado && principales.length ? principales.map((r) => ({ id: r.id, family: familiaDe(r.projectId), projectId: r.projectId, hours: String(r.hours) })) : [nuevaFila("proyectos")]);
-      setExcedentes(extra.map((r) => ({ id: r.id, family: familiaDe(r.projectId), projectId: r.projectId, hours: String(r.hours) })));
+      setFilas(!especialEncontrado ? principales.map((r) => { const family = familiaDe(r.projectId); return { id: r.id, family, tipo: tipoDe(family, r.projectId), projectId: r.projectId, hours: String(r.hours) }; }) : []);
+      setExcedentes(extra.map((r) => { const family = familiaDe(r.projectId); return { id: r.id, family, tipo: tipoDe(family, r.projectId), projectId: r.projectId, hours: String(r.hours) }; }));
       setDirty(false);
     }).catch(() => {});
   }, [api, proyectos, auxiliares]); // eslint-disable-line
@@ -618,10 +634,22 @@ function ImputacionHoras({ api, user, config, showToast }) {
   const totalExcedente = excedentes.reduce((s, f) => s + (parseFloat(f.hours) || 0), 0);
   const excedeCap = totalPrincipal > cap + 0.001;
 
-  const addFila = () => { setFilas((f) => [...f, nuevaFila("proyectos")]); setDirty(true); };
+  const addFila = () => {
+    const esPrimera = filas.length === 0 && !estadoEspecial;
+    const nueva = nuevaFila("proyectos", "pedido");
+    if (esPrimera && cap > 0) nueva.hours = String(cap);
+    setFilas((f) => [...f, nueva]);
+    setDirty(true);
+  };
   const removeFila = (id) => { setFilas((f) => f.filter((x) => x.id !== id)); setDirty(true); };
   const updateFila = (id, patch) => { setFilas((f) => f.map((x) => (x.id === id ? { ...x, ...patch } : x))); setDirty(true); };
-  const quickFill = (family, projectId) => { setFilas([{ id: "n" + Math.random(), family, projectId, hours: String(cap) }]); setDirty(true); };
+  const quickFillRecurrente = (family) => {
+    const listaFamilia = family === "auxiliar" ? auxiliares : proyectos;
+    const recurrentes = listaFamilia.filter((o) => o.fixed);
+    if (!recurrentes.length) { showToast(`No hay conceptos recurrentes en ${family === "auxiliar" ? "Auxiliar" : "Proyectos"} todavía.`); return; }
+    setFilas([{ id: "n" + Math.random(), family, tipo: "recurrente", projectId: recurrentes[0].id, hours: cap > 0 ? String(cap) : "" }]);
+    setDirty(true);
+  };
 
   const toggleEspecial = (nombre) => { setEstadoEspecial((actual) => (actual === nombre ? null : nombre)); setDirty(true); };
 
@@ -640,11 +668,16 @@ function ImputacionHoras({ api, user, config, showToast }) {
     }
   };
 
-  const addExcedente = () => { setExcedentes((f) => [...f, nuevaFila("proyectos")]); setDirty(true); };
+  const addExcedente = () => { setExcedentes((f) => [...f, nuevaFila("proyectos", "pedido")]); setDirty(true); };
   const removeExcedente = (id) => { setExcedentes((f) => f.filter((x) => x.id !== id)); setDirty(true); };
   const updateExcedente = (id, patch) => { setExcedentes((f) => f.map((x) => (x.id === id ? { ...x, ...patch } : x))); setDirty(true); };
 
-  const cambiarFamiliaFila = (setter) => (id, family) => setter((f) => f.map((x) => (x.id === id ? { ...x, family, projectId: (family === "auxiliar" ? auxiliares : proyectos)[0]?.id || "" } : x)));
+  const cambiarFamiliaFila = (setter) => (id, family) => setter((f) => f.map((x) => {
+    if (x.id !== id) return x;
+    const listaFamilia = family === "auxiliar" ? auxiliares : proyectos;
+    const filtrada = listaFamilia.filter((o) => !!o.fixed === (x.tipo === "recurrente"));
+    return { ...x, family, projectId: filtrada[0]?.id || "" };
+  }));
   const cambiarFamiliaFilaP = cambiarFamiliaFila(setFilas);
   const cambiarFamiliaExc = cambiarFamiliaFila(setExcedentes);
 
@@ -706,18 +739,16 @@ function ImputacionHoras({ api, user, config, showToast }) {
           </div>
         ) : (
           <>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, margin: "14px 0" }}>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                <span style={{ fontSize: 12, color: "var(--muted)" }}>📁 Jornada completa en Proyectos ({cap}h):</span>
-                {recientesProyectos.map((o) => <button key={o.id} className="btn btn-ghost btn-sm" onClick={() => quickFill("proyectos", o.id)}>{o.name}</button>)}
-              </div>
-              {esFabrica && (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <span style={{ fontSize: 12, color: "var(--muted)" }}>🔧 Jornada completa en Auxiliar ({cap}h):</span>
-                  {recientesAuxiliares.map((o) => <button key={o.id} className="btn btn-ghost btn-sm" onClick={() => quickFill("auxiliar", o.id)}>{o.name}</button>)}
-                </div>
-              )}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "14px 0" }}>
+              <button className="btn btn-sm" style={{ background: "var(--office)18", color: "var(--office)", fontWeight: 700, border: "1px solid var(--office)55" }} onClick={() => quickFillRecurrente("proyectos")}>🔁 RECURRENTE PROYECTOS</button>
+              {esFabrica && <button className="btn btn-sm" style={{ background: "var(--fabrica)18", color: "var(--fabrica)", fontWeight: 700, border: "1px solid var(--fabrica)55" }} onClick={() => quickFillRecurrente("auxiliar")}>🔁 RECURRENTE AUXILIAR</button>}
             </div>
+            <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 10 }}>"Recurrente" = trabajo habitual de siempre. "Pedido" = un trabajo o proyecto concreto (usa "Añadir concepto" para elegirlo).</div>
+            {filas.length === 0 && (
+              <div style={{ padding: "12px 14px", borderRadius: 10, background: "#F6F4EF", border: "1px dashed var(--line)", fontSize: 13, color: "var(--muted)", marginBottom: 10 }}>
+                Todavía no has imputado nada hoy. Pulsa "RECURRENTE" arriba si has hecho trabajo habitual, o "Añadir concepto" abajo para elegir un pedido concreto.
+              </div>
+            )}
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {filas.map((f) => (
                 <FilaImputacion
@@ -730,7 +761,7 @@ function ImputacionHoras({ api, user, config, showToast }) {
               ))}
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14 }}>
-              <button className="btn btn-ghost btn-sm" onClick={addFila}><Plus size={14} /> Añadir concepto</button>
+              <button className="btn btn-ghost btn-sm" onClick={addFila}><Plus size={14} /> Añadir concepto (pedido)</button>
               <div style={{ fontSize: 13, fontWeight: 700 }}>Total: <span className="mono" style={{ color: excedeCap ? "var(--warn)" : "var(--ink)" }}>{totalPrincipal}h</span> <span style={{ color: "var(--muted)", fontWeight: 400 }}>/ {cap}h</span></div>
             </div>
             {excedeCap && <div style={{ marginTop: 10, fontSize: 12.5, color: "var(--warn)", display: "flex", gap: 6, alignItems: "flex-start" }}><AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} /><span>Superas el máximo de {cap}h para este día. Mueve el resto a "Horas excedentes" más abajo.</span></div>}
@@ -1502,23 +1533,24 @@ function GestionUsuarios({ api, refreshConfig, showToast }) {
       </div>
       <div className="card">
         <h3 style={{ fontSize: 14, marginBottom: 10 }}>Trabajadores</h3>
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>Trabajador</th><th style={{ width: 60 }}>Proy.</th><th style={{ width: 60 }}>Aux.</th><th style={{ width: 40 }}></th></tr></thead>
-            <tbody>
-              {usuarios.map((u) => (
-                <tr key={u.id}>
-                  <td className="td-clip">
-                    <div style={{ fontWeight: 600 }}>{u.name}</div>
-                    <div style={{ fontSize: 11, color: "var(--muted)" }}>{roleLabels[u.role]} · PIN <span className="mono">{u.pin}</span></div>
-                  </td>
-                  <td className="td-actions">{u.role !== "admin" && <button className={`btn btn-sm ${respProy.includes(u.id) ? "btn-accent" : "btn-ghost"}`} onClick={() => toggleRespProy(u.id)} title="Responsable de proyectos"><ShieldCheck size={13} /></button>}</td>
-                  <td className="td-actions">{u.role !== "admin" && <button className={`btn btn-sm ${respAux.includes(u.id) ? "btn-accent" : "btn-ghost"}`} onClick={() => toggleRespAux(u.id)} title="Responsable de auxiliares"><ShieldCheck size={13} /></button>}</td>
-                  <td className="td-actions">{u.role !== "admin" && <button className="btn btn-danger btn-sm" onClick={() => delUser(u.id)} title="Eliminar"><Trash2 size={13} /></button>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {usuarios.map((u) => (
+            <div key={u.id} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{u.name}</div>
+                  <div style={{ fontSize: 12, color: "var(--muted)" }}>{roleLabels[u.role]} · PIN <span className="mono">{u.pin}</span></div>
+                </div>
+                {u.role !== "admin" && <button className="btn btn-danger btn-sm" style={{ flexShrink: 0 }} onClick={() => delUser(u.id)} title="Eliminar"><Trash2 size={13} /></button>}
+              </div>
+              {u.role !== "admin" && (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                  <button className={`btn btn-sm ${respProy.includes(u.id) ? "btn-accent" : "btn-ghost"}`} onClick={() => toggleRespProy(u.id)}><ShieldCheck size={13} /> Resp. proyectos</button>
+                  <button className={`btn btn-sm ${respAux.includes(u.id) ? "btn-accent" : "btn-ghost"}`} onClick={() => toggleRespAux(u.id)}><ShieldCheck size={13} /> Resp. auxiliares</button>
+                </div>
+              )}
+            </div>
+          ))}
         </div>
         <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 10 }}>"Resp. proyectos" y "Resp. auxiliares" dan permiso para crear/gestionar conceptos en esa familia, sin ser administrador. Comunica el PIN a cada trabajador para que entre desde su móvil.</div>
       </div>
