@@ -546,31 +546,38 @@ function opcionesDe(config, user) {
 // habituales/por defecto del resto, dentro de los desplegables.
 const estiloOpcionFija = { fontStyle: "italic", color: "#8A8680" };
 
-function FilaImputacion({ f, opciones, mostrarFamilia, cap, onFamily, onTipo, onConcepto, onHoras, onRemove }) {
-  const listaFamilia = f.family === "auxiliar" ? opciones.auxiliares : opciones.proyectos;
-  const listaFamiliaTodos = f.family === "auxiliar" ? opciones.auxiliaresTodos : opciones.proyectosTodos;
+function FilaImputacion({ f, opciones, mostrarAuxiliar, cap, onTipo, onConcepto, onHoras, onRemove }) {
   const esRecurrente = f.tipo === "recurrente";
-  const lista = listaFamilia.filter((o) => !!o.fixed === esRecurrente);
-  const listaTodos = (listaFamiliaTodos || []).filter((o) => !!o.fixed === esRecurrente);
-  const listaFinal = lista.some((o) => o.id === f.projectId) ? lista : [...lista, ...listaTodos.filter((o) => o.id === f.projectId)];
+  const proyectosF = opciones.proyectos.filter((o) => !!o.fixed === esRecurrente);
+  const auxiliaresF = mostrarAuxiliar ? opciones.auxiliares.filter((o) => !!o.fixed === esRecurrente) : [];
+  const enListas = [...proyectosF, ...auxiliaresF].some((o) => o.id === f.projectId);
+  let extra = [];
+  if (!enListas && f.projectId) {
+    const todos = [...(opciones.proyectosTodos || []), ...(opciones.auxiliaresTodos || [])];
+    const item = todos.find((o) => o.id === f.projectId && !!o.fixed === esRecurrente);
+    if (item) extra = [item];
+  }
+  const sinOpciones = proyectosF.length === 0 && auxiliaresF.length === 0 && extra.length === 0;
   return (
     <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ display: "flex", gap: 8 }}>
-        {mostrarFamilia && (
-          <select className="input" style={{ flex: 1 }} value={f.family} onChange={(e) => onFamily(e.target.value)}>
-            <option value="proyectos">📁 Proyectos</option>
-            <option value="auxiliar">🔧 Auxiliar</option>
-          </select>
-        )}
-        <select className="input" style={{ flex: 1 }} value={f.tipo} onChange={(e) => onTipo(e.target.value)}>
-          <option value="recurrente">🔁 Recurrente</option>
-          <option value="pedido">📦 Pedido concreto</option>
-        </select>
-      </div>
+      <select className="input" value={f.tipo} onChange={(e) => onTipo(e.target.value)}>
+        <option value="recurrente">🔁 Recurrente</option>
+        <option value="pedido">📦 Pedido concreto</option>
+      </select>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <select className="input" style={{ flex: 1, minWidth: 150 }} value={f.projectId} onChange={(e) => onConcepto(e.target.value)}>
-          {listaFinal.length === 0 && <option value="">— sin {esRecurrente ? "recurrentes" : "pedidos"} —</option>}
-          {listaFinal.map((o) => <option key={o.id} value={o.id} style={!o.visible ? { color: "var(--warn)" } : undefined}>{o.name}{!o.visible ? " (oculto)" : ""}</option>)}
+          {sinOpciones && <option value="">— sin {esRecurrente ? "recurrentes" : "pedidos"} —</option>}
+          {proyectosF.length > 0 && (
+            <optgroup label="📁 Proyectos">
+              {proyectosF.map((o) => <option key={o.id} value={o.id} style={!o.visible ? { color: "var(--warn)" } : undefined}>{o.name}{!o.visible ? " (oculto)" : ""}</option>)}
+            </optgroup>
+          )}
+          {auxiliaresF.length > 0 && (
+            <optgroup label="🔧 Auxiliar">
+              {auxiliaresF.map((o) => <option key={o.id} value={o.id} style={!o.visible ? { color: "var(--warn)" } : undefined}>{o.name}{!o.visible ? " (oculto)" : ""}</option>)}
+            </optgroup>
+          )}
+          {extra.map((o) => <option key={o.id} value={o.id} style={{ color: "var(--warn)" }}>{o.name} (oculto)</option>)}
         </select>
         <input className="input mono" style={{ width: 92 }} type="number" step="0.25" min="0" max={cap || 24} placeholder="h" value={f.hours} onChange={(e) => onHoras(e.target.value)} />
         <button className="btn btn-danger btn-sm" onClick={onRemove}><Trash2 size={14} /></button>
@@ -599,11 +606,15 @@ function ImputacionHoras({ api, user, config, showToast }) {
     return item && item.fixed ? "recurrente" : "pedido";
   };
 
-  const nuevaFila = (family, tipo) => {
-    const listaFamilia = family === "auxiliar" ? auxiliares : proyectos;
-    const filtrada = listaFamilia.filter((o) => !!o.fixed === (tipo === "recurrente"));
-    return { id: "n" + Math.random(), family, tipo, projectId: filtrada[0]?.id || "", hours: "" };
+  const primerConceptoDe = (tipo) => {
+    const enProyectos = proyectos.filter((o) => !!o.fixed === (tipo === "recurrente"));
+    if (enProyectos.length) return { family: "proyectos", projectId: enProyectos[0].id };
+    const enAux = esFabrica ? auxiliares.filter((o) => !!o.fixed === (tipo === "recurrente")) : [];
+    if (enAux.length) return { family: "auxiliar", projectId: enAux[0].id };
+    return { family: "proyectos", projectId: "" };
   };
+
+  const nuevaFila = (tipo) => ({ id: "n" + Math.random(), tipo, hours: "", ...primerConceptoDe(tipo) });
 
   const cargarDia = useCallback((f) => {
     api("GET", "/api/imputaciones?date=" + f).then((rows) => {
@@ -626,7 +637,7 @@ function ImputacionHoras({ api, user, config, showToast }) {
 
   const addFila = () => {
     const esPrimera = filas.length === 0 && !estadoEspecial;
-    const nueva = nuevaFila("proyectos", "recurrente");
+    const nueva = nuevaFila("recurrente");
     if (esPrimera && cap > 0) nueva.hours = String(cap);
     setFilas((f) => [...f, nueva]);
     setDirty(true);
@@ -651,25 +662,11 @@ function ImputacionHoras({ api, user, config, showToast }) {
     }
   };
 
-  const addExcedente = () => { setExcedentes((f) => [...f, nuevaFila("proyectos", "pedido")]); setDirty(true); };
+  const addExcedente = () => { setExcedentes((f) => [...f, nuevaFila("pedido")]); setDirty(true); };
   const removeExcedente = (id) => { setExcedentes((f) => f.filter((x) => x.id !== id)); setDirty(true); };
   const updateExcedente = (id, patch) => { setExcedentes((f) => f.map((x) => (x.id === id ? { ...x, ...patch } : x))); setDirty(true); };
 
-  const cambiarFamiliaFila = (setter) => (id, family) => setter((f) => f.map((x) => {
-    if (x.id !== id) return x;
-    const listaFamilia = family === "auxiliar" ? auxiliares : proyectos;
-    const filtrada = listaFamilia.filter((o) => !!o.fixed === (x.tipo === "recurrente"));
-    return { ...x, family, projectId: filtrada[0]?.id || "" };
-  }));
-  const cambiarFamiliaFilaP = cambiarFamiliaFila(setFilas);
-  const cambiarFamiliaExc = cambiarFamiliaFila(setExcedentes);
-
-  const cambiarTipoFila = (setter) => (id, tipo) => setter((f) => f.map((x) => {
-    if (x.id !== id) return x;
-    const listaFamilia = x.family === "auxiliar" ? auxiliares : proyectos;
-    const filtrada = listaFamilia.filter((o) => !!o.fixed === (tipo === "recurrente"));
-    return { ...x, tipo, projectId: filtrada[0]?.id || "" };
-  }));
+  const cambiarTipoFila = (setter) => (id, tipo) => setter((f) => f.map((x) => (x.id === id ? { ...x, tipo, ...primerConceptoDe(tipo) } : x)));
   const cambiarTipoFilaP = cambiarTipoFila(setFilas);
   const cambiarTipoExc = cambiarTipoFila(setExcedentes);
 
@@ -740,10 +737,9 @@ function ImputacionHoras({ api, user, config, showToast }) {
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {filas.map((f) => (
                 <FilaImputacion
-                  key={f.id} f={f} opciones={opciones} mostrarFamilia={esFabrica} cap={cap}
-                  onFamily={(fam) => cambiarFamiliaFilaP(f.id, fam)}
+                  key={f.id} f={f} opciones={opciones} mostrarAuxiliar={esFabrica} cap={cap}
                   onTipo={(t) => cambiarTipoFilaP(f.id, t)}
-                  onConcepto={(v) => updateFila(f.id, { projectId: v })}
+                  onConcepto={(v) => updateFila(f.id, { projectId: v, family: familiaDe(v) })}
                   onHoras={(v) => updateFilaHoras(f.id, v)}
                   onRemove={() => removeFila(f.id)}
                 />
@@ -768,10 +764,9 @@ function ImputacionHoras({ api, user, config, showToast }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
           {excedentes.map((f) => (
             <FilaImputacion
-              key={f.id} f={f} opciones={opciones} mostrarFamilia={esFabrica} cap={24}
-              onFamily={(fam) => cambiarFamiliaExc(f.id, fam)}
+              key={f.id} f={f} opciones={opciones} mostrarAuxiliar={esFabrica} cap={24}
               onTipo={(t) => cambiarTipoExc(f.id, t)}
-              onConcepto={(v) => updateExcedente(f.id, { projectId: v })}
+              onConcepto={(v) => updateExcedente(f.id, { projectId: v, family: familiaDe(v) })}
               onHoras={(v) => updateExcedente(f.id, { hours: v })}
               onRemove={() => removeExcedente(f.id)}
             />
