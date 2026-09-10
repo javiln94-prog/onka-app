@@ -536,7 +536,7 @@ function opcionesDe(config, user) {
   const ordenar = (list) => [...list].sort((a, b) => (a.fixed === b.fixed ? 0 : a.fixed ? 1 : -1));
   const especiales = config.projects.filter((p) => CONCEPTOS_ESPECIALES.includes(p.name));
   const proyectosTodos = ordenar(config.projects.filter((p) => !CONCEPTOS_ESPECIALES.includes(p.name)).map((p) => ({ id: p.id, name: p.name, fixed: !!p.fixed, visible: p.visible !== false })));
-  const auxiliaresTodos = (user.role === "fabrica" || user.role === "admin") ? ordenar(config.auxTasks.map((t) => ({ id: t.id, name: t.name, fixed: !!t.fixed, visible: t.visible !== false }))) : [];
+  const auxiliaresTodos = ordenar(config.auxTasks.map((t) => ({ id: t.id, name: t.name, fixed: !!t.fixed, visible: t.visible !== false })));
   const proyectos = proyectosTodos.filter((p) => p.visible);
   const auxiliares = auxiliaresTodos.filter((t) => t.visible);
   return { proyectos, auxiliares, especiales, proyectosTodos, auxiliaresTodos };
@@ -595,7 +595,7 @@ function ImputacionHoras({ api, user, config, showToast }) {
   const [dirty, setDirty] = useState(false);
   const { proyectos, auxiliares, especiales, proyectosTodos, auxiliaresTodos } = useMemo(() => opcionesDe(config, user), [config, user]);
   const opciones = { proyectos, auxiliares, proyectosTodos, auxiliaresTodos };
-  const esFabrica = (user.role === "fabrica" || user.role === "admin") && auxiliares.length > 0;
+  const esFabrica = auxiliares.length > 0;
   const cap = dailyCap(fecha);
 
   const idsAuxiliares = useMemo(() => new Set(auxiliaresTodos.map((a) => a.id)), [auxiliaresTodos]);
