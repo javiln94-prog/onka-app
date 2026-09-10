@@ -40,7 +40,7 @@ function uid() {
 // -----------------------------------------------------------------
 function seedData() {
   return {
-    users: [{ id: "u_admin", name: "Javi López", role: "admin", pin: "0000" }],
+    users: [{ id: "u_admin", name: "Javi López", role: "admin", pin: "0000", company: "ONKA" }],
     projects: [
       { id: uid(), name: "Mantenimiento maquinaria", fixed: true, visible: true },
       { id: uid(), name: "Captación de clientes", fixed: true, visible: true },
@@ -86,6 +86,7 @@ function migrate(data) {
   });
   const admin = data.users.find((u) => u.id === "u_admin");
   if (admin && admin.name === "Administrador") admin.name = "Javi López";
+  data.users = data.users.map((u) => (["ONKA", "ALACANT"].includes(u.company) ? u : { ...u, company: "ONKA" }));
   return data;
 }
 
@@ -359,7 +360,7 @@ async function handleApi(req, res, pathname, query) {
       auxTasks: data.auxTasks,
       responsablesProyecto: data.responsablesProyecto,
       responsablesAuxiliar: data.responsablesAuxiliar,
-      users: data.users.map((u) => ({ id: u.id, name: u.name, role: u.role })),
+      users: data.users.map((u) => ({ id: u.id, name: u.name, role: u.role, company: u.company })),
       me: session,
     });
   }
@@ -428,7 +429,8 @@ async function handleApi(req, res, pathname, query) {
     const body = await readBody(req);
     if (!body.name || !body.name.trim()) return sendJSON(res, 400, { error: "Nombre requerido" });
     const role = ["oficina", "fabrica", "admin"].includes(body.role) ? body.role : "oficina";
-    const user = { id: uid(), name: body.name.trim(), role, pin: String(body.pin || "1234") };
+    const company = ["ONKA", "ALACANT"].includes(body.company) ? body.company : "ONKA";
+    const user = { id: uid(), name: body.name.trim(), role, pin: String(body.pin || "1234"), company };
     const updated = await persist((d) => { d.users.push(user); return d; });
     return sendJSON(res, 200, updated.users);
   }
@@ -436,6 +438,7 @@ async function handleApi(req, res, pathname, query) {
     if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
     const id = pathname.split("/").pop();
     const body = await readBody(req);
+    if (body.company !== undefined && !["ONKA", "ALACANT"].includes(body.company)) delete body.company;
     const updated = await persist((d) => { d.users = d.users.map((u) => (u.id === id ? { ...u, ...body, id: u.id } : u)); return d; });
     return sendJSON(res, 200, updated.users);
   }
@@ -462,6 +465,22 @@ async function handleApi(req, res, pathname, query) {
     const id = pathname.split("/")[3];
     const updated = await persist((d) => { d.responsablesAuxiliar = d.responsablesAuxiliar.includes(id) ? d.responsablesAuxiliar.filter((x) => x !== id) : [...d.responsablesAuxiliar, id]; return d; });
     return sendJSON(res, 200, { responsablesAuxiliar: updated.responsablesAuxiliar });
+  }
+
+  // ---- Mantenimiento (solo administrador): borra fichajes, imputaciones y
+  // calendario de todos los usuarios, y los proyectos/trabajos que NO sean
+  // recurrentes. Mantiene usuarios, PIN, permisos y los recurrentes (fixed).
+  if (pathname === "/api/admin/reset-datos" && req.method === "POST") {
+    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    const updated = await persist((d) => {
+      d.fichajes = [];
+      d.imputaciones = [];
+      d.events = [];
+      d.projects = d.projects.filter((p) => p.fixed);
+      d.auxTasks = d.auxTasks.filter((t) => t.fixed);
+      return d;
+    });
+    return sendJSON(res, 200, { ok: true, projects: updated.projects, auxTasks: updated.auxTasks });
   }
 
   // ---- Frases motivacionales (solo administrador) ----
