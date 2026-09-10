@@ -1590,20 +1590,22 @@ function GestionFamilia({ api, config, refreshConfig, showToast, familia }) {
   const items = [...itemsRaw].sort((a, b) => (a.fixed === b.fixed ? 0 : a.fixed ? 1 : -1));
   const basePath = esProyectos ? "/api/projects" : "/api/aux-tasks";
   const [nombre, setNombre] = useState("");
+  const [nuevoTipo, setNuevoTipo] = useState("pedido");
   const [editandoId, setEditandoId] = useState(null);
   const [nombreEdit, setNombreEdit] = useState("");
+  const [tipoEdit, setTipoEdit] = useState("pedido");
 
   const addItem = async () => {
     if (!nombre.trim()) return;
-    try { await api("POST", basePath, { name: nombre.trim(), fixed: false }); setNombre(""); refreshConfig(); showToast("Añadido."); }
+    try { await api("POST", basePath, { name: nombre.trim(), fixed: nuevoTipo === "recurrente" }); setNombre(""); setNuevoTipo("pedido"); refreshConfig(); showToast("Añadido."); }
     catch (e) { showToast(e.message); }
   };
   const delItem = async (id) => { try { await api("DELETE", `${basePath}/${id}`); refreshConfig(); } catch (e) { showToast(e.message); } };
   const toggleVisible = async (it) => { try { await api("PATCH", `${basePath}/${it.id}`, { visible: it.visible === false }); refreshConfig(); } catch (e) { showToast(e.message); } };
-  const empezarEdicion = (it) => { setEditandoId(it.id); setNombreEdit(it.name); };
+  const empezarEdicion = (it) => { setEditandoId(it.id); setNombreEdit(it.name); setTipoEdit(it.fixed ? "recurrente" : "pedido"); };
   const guardarEdicion = async (id) => {
     if (!nombreEdit.trim()) return;
-    try { await api("PATCH", `${basePath}/${id}`, { name: nombreEdit.trim() }); setEditandoId(null); refreshConfig(); showToast("Actualizado."); }
+    try { await api("PATCH", `${basePath}/${id}`, { name: nombreEdit.trim(), fixed: tipoEdit === "recurrente" }); setEditandoId(null); refreshConfig(); showToast("Actualizado."); }
     catch (e) { showToast(e.message); }
   };
 
@@ -1615,6 +1617,10 @@ function GestionFamilia({ api, config, refreshConfig, showToast, familia }) {
       </p>
       <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
         <input className="input" style={{ flex: 1, minWidth: 180 }} placeholder="Nombre del nuevo proyecto o trabajo" value={nombre} onChange={(e) => setNombre(e.target.value)} />
+        <select className="input" style={{ width: "auto", minWidth: 150 }} value={nuevoTipo} onChange={(e) => setNuevoTipo(e.target.value)}>
+          <option value="pedido">📦 Pedido concreto</option>
+          <option value="recurrente">🔁 Recurrente</option>
+        </select>
         <button className="btn btn-primary" onClick={addItem}><Plus size={14} /> Añadir</button>
       </div>
       <div className="table-wrap"><table><thead><tr><th>Nombre</th><th style={{ width: 128 }}></th></tr></thead><tbody>
@@ -1622,8 +1628,12 @@ function GestionFamilia({ api, config, refreshConfig, showToast, familia }) {
           <tr key={it.id} style={it.visible === false ? { opacity: 0.55 } : undefined}>
             {editandoId === it.id ? (
               <td className="td-actions" colSpan={2}>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <input className="input" style={{ flex: 1 }} value={nombreEdit} onChange={(e) => setNombreEdit(e.target.value)} autoFocus />
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <input className="input" style={{ flex: 1, minWidth: 140 }} value={nombreEdit} onChange={(e) => setNombreEdit(e.target.value)} autoFocus />
+                  <select className="input" style={{ width: "auto" }} value={tipoEdit} onChange={(e) => setTipoEdit(e.target.value)}>
+                    <option value="pedido">📦 Pedido concreto</option>
+                    <option value="recurrente">🔁 Recurrente</option>
+                  </select>
                   <button className="btn btn-primary btn-sm" onClick={() => guardarEdicion(it.id)}><Check size={13} /></button>
                   <button className="btn btn-ghost btn-sm" onClick={() => setEditandoId(null)}><X size={13} /></button>
                 </div>
@@ -1633,7 +1643,7 @@ function GestionFamilia({ api, config, refreshConfig, showToast, familia }) {
                 <td className="td-clip" style={it.fixed ? estiloOpcionFija : undefined}>{it.name}{it.visible === false && <span className="pill" style={{ marginLeft: 8, background: "#EEECE6", color: "var(--muted)" }}>Oculto</span>}</td>
                 <td className="td-actions" style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
                   <button className={`btn btn-sm ${it.visible === false ? "btn-ghost" : "btn-accent"}`} onClick={() => toggleVisible(it)} title={it.visible === false ? "Mostrar en la imputación" : "Ocultar de la imputación"}>{it.visible === false ? <EyeOff size={13} /> : <Eye size={13} />}</button>
-                  <button className="btn btn-ghost btn-sm" onClick={() => empezarEdicion(it)} title="Editar nombre"><Settings size={13} /></button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => empezarEdicion(it)} title="Editar nombre y tipo"><Settings size={13} /></button>
                   <button className="btn btn-danger btn-sm" onClick={() => delItem(it.id)}><Trash2 size={13} /></button>
                 </td>
               </>
