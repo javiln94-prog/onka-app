@@ -60,6 +60,10 @@ function seedData() {
     responsablesProyecto: [], // ids de usuarios autorizados a gestionar la familia "proyectos"
     responsablesAuxiliar: [], // ids de usuarios autorizados a gestionar la familia "auxiliares"
     frases: [], // frases motivacionales del administrador, visibles en el login
+    horario: {
+      lunJue: "8:00–10:00 · 10:00–10:30 almuerzo · 10:30–14:00 · 14:00–15:00 comida · 15:00–18:00",
+      viernes: "8:00–13:30 (con 30 min de almuerzo, 10:00–10:30)",
+    },
     sessions: {},
   };
 }
@@ -79,6 +83,7 @@ function migrate(data) {
   });
   data.auxTasks = data.auxTasks || [];
   data.frases = data.frases || [];
+  if (!data.horario) data.horario = { lunJue: "8:00–10:00 · 10:00–10:30 almuerzo · 10:30–14:00 · 14:00–15:00 comida · 15:00–18:00", viernes: "8:00–13:30 (con 30 min de almuerzo, 10:00–10:30)" };
   data.projects = data.projects.map((p) => ({ visible: true, ...p }));
   data.auxTasks = data.auxTasks.map((t) => ({ visible: true, ...t }));
   ["Preparación pedidos PLV", "Mantenimiento maquinaria", "Carga descarga no pedidos"].forEach((nombre) => {
@@ -361,8 +366,19 @@ async function handleApi(req, res, pathname, query) {
       responsablesProyecto: data.responsablesProyecto,
       responsablesAuxiliar: data.responsablesAuxiliar,
       users: data.users.map((u) => ({ id: u.id, name: u.name, role: u.role, company: u.company })),
+      horario: data.horario,
       me: session,
     });
+  }
+
+  if (pathname === "/api/admin/horario" && req.method === "PATCH") {
+    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    const body = await readBody(req);
+    const updated = await persist((d) => {
+      d.horario = { lunJue: String(body.lunJue ?? d.horario.lunJue), viernes: String(body.viernes ?? d.horario.viernes) };
+      return d;
+    });
+    return sendJSON(res, 200, updated.horario);
   }
 
   // ---- Familia "Proyectos" (oficina + fábrica) ----
