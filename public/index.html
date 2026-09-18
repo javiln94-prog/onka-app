@@ -409,7 +409,7 @@ function Shell({ user, api, tab, setTab, onLogout, config, refreshConfig, events
       </div>
 
       <div style={{ padding: 20, maxWidth: 1080, margin: "0 auto" }}>
-        {tab === "fichaje" && <Fichaje api={api} user={user} misFichajes={misFichajes} refresh={refreshMisFichajes} showToast={showToast} events={events} />}
+        {tab === "fichaje" && <Fichaje api={api} user={user} misFichajes={misFichajes} refresh={refreshMisFichajes} showToast={showToast} events={events} config={config} />}
         {tab === "horas" && <ImputacionHoras api={api} user={user} config={config} showToast={showToast} />}
         {tab === "calendario" && <Calendario api={api} user={user} events={events} refreshEvents={refreshEvents} config={config} />}
         {tab === "admin" && puedeGestion && <Admin api={api} config={config} refreshConfig={refreshConfig} showToast={showToast} isAdmin={isAdmin} puedeProyectos={puedeProyectos} puedeAuxiliar={puedeAuxiliar} />}
@@ -425,7 +425,7 @@ function Shell({ user, api, tab, setTab, onLogout, config, refreshConfig, events
 /* =================================================================
    PANTALLA 1 — FICHAJE
 ================================================================= */
-function Fichaje({ api, user, misFichajes, refresh, showToast, events }) {
+function Fichaje({ api, user, misFichajes, refresh, showToast, events, config }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
 
@@ -505,8 +505,8 @@ function Fichaje({ api, user, misFichajes, refresh, showToast, events }) {
       <div className="card">
         <h3 style={{ fontSize: 14, marginBottom: 10 }}>Horario de la empresa</h3>
         <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 13 }}>
-          <div><strong>Lunes a jueves:</strong> 8:00–10:00 · <span style={{ color: "var(--muted)" }}>10:00–10:30 almuerzo</span> · 10:30–14:00 · <span style={{ color: "var(--muted)" }}>14:00–15:00 comida</span> · 15:00–18:00</div>
-          <div><strong>Viernes:</strong> 8:00–13:30 <span style={{ color: "var(--muted)" }}>(con 30 min de almuerzo, 10:00–10:30)</span></div>
+          <div><strong>Lunes a jueves:</strong> {config?.horario?.lunJue || "—"}</div>
+          <div><strong>Viernes:</strong> {config?.horario?.viernes || "—"}</div>
         </div>
       </div>
     </div>
@@ -1127,6 +1127,7 @@ function Admin({ api, config, refreshConfig, showToast, isAdmin, puedeProyectos,
     puedeProyectos && ["proyectos", "Proyectos", <Briefcase size={14} key="p" />],
     puedeAuxiliar && ["auxiliar", "Auxiliares", <Cog size={14} key="a" />],
     isAdmin && ["frases", "Frase motivacional", <BellRing size={14} key="f" />],
+    isAdmin && ["horario", "Horario laboral", <Clock size={14} key="h" />],
     isAdmin && ["mantenimiento", "Mantenimiento", <AlertTriangle size={14} key="m" />],
   ].filter(Boolean);
   const [sub, setSub] = useState(tabsDisponibles[0]?.[0] || "proyectos");
@@ -1142,6 +1143,7 @@ function Admin({ api, config, refreshConfig, showToast, isAdmin, puedeProyectos,
       {sub === "proyectos" && puedeProyectos && <GestionFamilia api={api} config={config} refreshConfig={refreshConfig} showToast={showToast} familia="proyectos" />}
       {sub === "auxiliar" && puedeAuxiliar && <GestionFamilia api={api} config={config} refreshConfig={refreshConfig} showToast={showToast} familia="auxiliares" />}
       {sub === "frases" && isAdmin && <GestionFrases api={api} showToast={showToast} />}
+      {sub === "horario" && isAdmin && <GestionHorario api={api} config={config} refreshConfig={refreshConfig} showToast={showToast} />}
       {sub === "mantenimiento" && isAdmin && <Mantenimiento api={api} refreshConfig={refreshConfig} showToast={showToast} />}
     </div>
   );
@@ -1158,25 +1160,98 @@ function formatoHMS(ms) {
   return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-// Por cada trabajador y día: primera entrada / última salida y las horas
-// resultantes. Se usa tanto para el mes seleccionado como para el acumulado anual.
+// Horario habitual usado SOLO para el redondeo de horas del informe (no es el
+// texto editable de "Horario laboral", que es solo para mostrar). Si cambias
+// los horarios de la empresa de forma duradera, avisa para actualizar esto también.
+const ANCLAS_HORARIO = {
+  lunJue: ["08:00:00", "14:00:00", "15:00:00", "18:00:00"],
+  viernes: ["08:00:00", "13:30:00"],
+};
+const MARGEN_REDONDEO_SEG = 20 * 60; // 20 minutos
+
+function horaASegundos(horaStr) {
+  const p = horaStr.split(":").map(Number);
+  return p[0] * 3600 + p[1] * 60 + (p[2] || 0);
+}
+
+// Redondea una hora fichada a la hora prevista más cercana, solo si está a
+// 20 minutos o menos de esa hora. Si no hay ninguna lo bastante cerca, se
+// deja la hora real tal cual.
+function redondearHora(horaStr, anclas) {
+  const raw = horaASegundos(horaStr);
+  let mejor = null, mejorDiff = Infinity;
+  anclas.forEach((a) => {
+    const diff = Math.abs(horaASegundos(a) - raw);
+    if (diff <= MARGEN_REDONDEO_SEG && diff < mejorDiff) { mejor = a; mejorDiff = diff; }
+  });
+  return mejor || horaStr;
+}
+
+// Igual que redondearHora, pero además dice si encontró una hora prevista lo
+// bastante cerca (true) o si tuvo que dejar la hora real tal cual (false).
+function redondearHoraInfo(horaStr, anclas) {
+  const raw = horaASegundos(horaStr);
+  let mejor = null, mejorDiff = Infinity;
+  anclas.forEach((a) => {
+    const diff = Math.abs(horaASegundos(a) - raw);
+    if (diff <= MARGEN_REDONDEO_SEG && diff < mejorDiff) { mejor = a; mejorDiff = diff; }
+  });
+  return { valor: mejor || horaStr, redondeada: mejor !== null };
+}
+
+// Por cada trabajador y día: suma cada tramo trabajado (entrada→salida) por
+// separado, redondeando cada hora a la prevista si está a ±20 min, y resta el
+// almuerzo de 30 min (L-V) solo si la entrada del día, ya redondeada, es
+// antes de las 11:00. Así el hueco real de la comida queda excluido solo,
+// sin depender de una hora fija de comida.
 function calcularHorasPorFichajes(fichajesArr) {
   const porClave = {};
   fichajesArr.forEach((f) => { const k = f.userId + "|" + f.date; (porClave[k] = porClave[k] || []).push(f); });
   const resultado = {};
   Object.entries(porClave).forEach(([clave, regs]) => {
-    const entradas = regs.filter((r) => r.type === "entrada").sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
-    const salidas = regs.filter((r) => r.type === "salida").sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
+    const [, fecha] = clave.split("|");
+    const ordenados = [...regs].sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
+    const entradas = ordenados.filter((r) => r.type === "entrada");
+    const salidas = ordenados.filter((r) => r.type === "salida");
     if (!entradas.length || !salidas.length) return;
     const primeraEntrada = entradas[0];
     const ultimaSalida = salidas[salidas.length - 1];
     const msTotal = new Date(ultimaSalida.timestamp) - new Date(primeraEntrada.timestamp);
     if (msTotal <= 0) return;
-    let msTrabajado = msTotal;
-    if (primeraEntrada.time < "10:00:00" && ultimaSalida.time > "10:00:00") msTrabajado -= 30 * 60000;
-    if (primeraEntrada.time < "14:00:00" && ultimaSalida.time > "15:00:00") msTrabajado -= 60 * 60000;
+
+    const diaSemana = new Date(fecha + "T00:00:00").getDay(); // 0 domingo ... 6 sábado
+    const esLunJue = diaSemana >= 1 && diaSemana <= 4;
+    const esViernes = diaSemana === 5;
+    const anclas = esLunJue ? ANCLAS_HORARIO.lunJue : (esViernes ? ANCLAS_HORARIO.viernes : []);
+
+    // Sumar cada tramo entrada→salida por separado (así el hueco real de la
+    // comida, que no coincide siempre exactamente con 14:00-15:00, no cuenta).
+    // De paso, apuntamos si alguna hora no se pudo redondear (llegó/se fue a
+    // más de 20 min de la hora prevista) para poder avisar de ello luego.
+    let msTrabajado = 0;
+    let entradaAbierta = null;
+    let algunaSinRedondear = false;
+    ordenados.forEach((r) => {
+      if (r.type === "entrada") {
+        entradaAbierta = r;
+      } else if (r.type === "salida" && entradaAbierta) {
+        const eIn = redondearHoraInfo(entradaAbierta.time, anclas);
+        const eOut = redondearHoraInfo(r.time, anclas);
+        if (anclas.length && (!eIn.redondeada || !eOut.redondeada)) algunaSinRedondear = true;
+        const msIni = new Date(`${fecha}T${eIn.valor}`).getTime();
+        const msFin = new Date(`${fecha}T${eOut.valor}`).getTime();
+        if (msFin > msIni) msTrabajado += msFin - msIni;
+        entradaAbierta = null;
+      }
+    });
+
+    // Almuerzo de 30 min: se resta solo si la entrada (redondeada) es antes de las 11:00
+    if ((esLunJue || esViernes) && redondearHora(primeraEntrada.time, anclas) < "11:00:00") {
+      msTrabajado -= 30 * 60000;
+    }
     if (msTrabajado < 0) msTrabajado = 0;
-    resultado[clave] = { msTotal, msTrabajado, horasTrabajadasDecimal: Math.round((msTrabajado / 3600000) * 100) / 100, idUltimo: ultimaSalida.id };
+
+    resultado[clave] = { msTotal, msTrabajado, horasTrabajadasDecimal: Math.round((msTrabajado / 3600000) * 100) / 100, idUltimo: ultimaSalida.id, sinRedondear: algunaSinRedondear };
   });
   return resultado;
 }
@@ -1302,25 +1377,6 @@ function Informes({ api, showToast, config }) {
   };
   const claveDia = (iso) => { const [, m, dd] = iso.split("-"); return dd + "/" + m; };
 
-  const pivotHorasPorTrabajador = () => {
-    const dias = diasDelRango();
-    const trabajadores = [...new Set(imputacionesF.map((i) => i.userName))].sort();
-    const filas = [];
-    trabajadores.forEach((nombre) => {
-      [["normal", "Horas normales"], ["excedente", "Horas excedentes"]].forEach(([tipo, etiqueta]) => {
-        const fila = { Trabajador: nombre, Tipo: etiqueta };
-        let total = 0;
-        dias.forEach((f) => {
-          const suma = imputacionesF.filter((i) => i.userName === nombre && i.date === f && (tipo === "excedente" ? i.excedente : !i.excedente)).reduce((s, i) => s + i.hours, 0);
-          if (suma > 0) { fila[claveDia(f)] = suma; total += suma; } else { fila[claveDia(f)] = ""; }
-        });
-        fila["Total"] = total;
-        if (total > 0) filas.push(fila);
-      });
-    });
-    return filas;
-  };
-
   const pivotPorConcepto = () => pivotPorConceptoDe(imputacionesF);
 
   const horasPorFichajes = useMemo(() => calcularHorasPorFichajes(fichajesF), [fichajesF]);
@@ -1344,15 +1400,39 @@ function Informes({ api, showToast, config }) {
     });
   };
 
-  // Pinta de rojo el texto de toda una fila de una hoja (para marcar cierres automáticos)
+  // Filas antes de la cabecera de datos cuando se añade la nota de fechas: la
+  // propia nota + una fila en blanco. La cabecera queda en la fila 3 de Excel.
+  const FILAS_NOTA = 2;
+
+  // Crea una hoja con una nota (p. ej. el rango de fechas) en la primera fila
+  // y la tabla de datos empezando dos filas más abajo.
+  const hojaConNota = (datos, nota) => {
+    const ws = XLSX.utils.aoa_to_sheet([[nota]]);
+    XLSX.utils.sheet_add_json(ws, datos, { origin: "A" + (FILAS_NOTA + 1) });
+    return ws;
+  };
+
+  // Pinta de rojo el texto de toda una fila de datos (para marcar cierres automáticos)
   const pintarFilaRoja = (ws, filaIndiceDatos, numCols) => {
     for (let c = 0; c < numCols; c++) {
-      const addr = XLSX.utils.encode_cell({ r: filaIndiceDatos + 1, c });
+      const addr = XLSX.utils.encode_cell({ r: filaIndiceDatos + FILAS_NOTA + 1, c });
       if (!ws[addr]) ws[addr] = { t: "s", v: "" };
       ws[addr].s = { font: { color: { rgb: "FFFF0000" } } };
     }
   };
-  const conFiltro = (ws) => { if (ws["!ref"]) ws["!autofilter"] = { ref: ws["!ref"] }; return ws; };
+  // Pinta de rojo el texto de una sola celda de datos (para avisar de horas sin redondear)
+  const pintarCeldaRoja = (ws, filaIndiceDatos, col) => {
+    const addr = XLSX.utils.encode_cell({ r: filaIndiceDatos + FILAS_NOTA + 1, c: col });
+    if (!ws[addr]) ws[addr] = { t: "s", v: "" };
+    ws[addr].s = { font: { color: { rgb: "FFFF0000" } } };
+  };
+  // Autofiltro solo sobre la tabla de datos, dejando fuera la fila de la nota
+  const conFiltro = (ws) => {
+    if (!ws["!ref"]) return ws;
+    const rango = XLSX.utils.decode_range(ws["!ref"]);
+    ws["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: FILAS_NOTA, c: rango.s.c }, e: rango.e }) };
+    return ws;
+  };
 
   const [exportando, setExportando] = useState(false);
 
@@ -1362,20 +1442,19 @@ function Informes({ api, showToast, config }) {
       const anio = new Date(hasta + "T00:00:00").getFullYear();
       const desdeAnio = `${anio}-01-01`;
       const hastaAnio = `${anio}-12-31`;
-      const [fichajesAnioRaw, imputacionesAnioRaw] = await Promise.all([
-        api("GET", `/api/fichajes?desde=${desdeAnio}&hasta=${hastaAnio}`),
-        api("GET", `/api/imputaciones/report?desde=${desdeAnio}&hasta=${hastaAnio}`),
-      ]);
+      const fichajesAnioRaw = await api("GET", `/api/fichajes?desde=${desdeAnio}&hasta=${hastaAnio}`);
       const fichajesAnio = filtrarEmpresa(fichajesAnioRaw);
-      const imputacionesAnio = filtrarEmpresa(imputacionesAnioRaw);
+
+      const notaRango = `Datos del ${desde} al ${hasta}`;
+      const notaAnio = `Datos del año ${anio} (${desdeAnio} a ${hastaAnio})`;
 
       const wb = XLSX.utils.book_new();
 
-      const wsGeneral = conFiltro(XLSX.utils.json_to_sheet(pivotFichajesGeneral()));
-      XLSX.utils.book_append_sheet(wb, wsGeneral, "FICHAJES GENERAL");
+      const wsGeneral = conFiltro(hojaConNota(pivotFichajesGeneral(), notaRango));
+      XLSX.utils.book_append_sheet(wb, wsGeneral, "FICHAJE MENSUAL");
 
-      const wsGeneralAnual = conFiltro(XLSX.utils.json_to_sheet(pivotFichajesAnual(fichajesAnio)));
-      XLSX.utils.book_append_sheet(wb, wsGeneralAnual, "FICHAJES GENERAL ACUMULADO");
+      const wsGeneralAnual = conFiltro(hojaConNota(pivotFichajesAnual(fichajesAnio), notaAnio));
+      XLSX.utils.book_append_sheet(wb, wsGeneralAnual, "FICHAJE ANUAL");
 
       const fichajesOrdenados = [...fichajesF].sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
       const filasFichajes = fichajesOrdenados.map((f) => {
@@ -1388,19 +1467,18 @@ function Informes({ api, showToast, config }) {
           "Horas totales trabajadas": esUltimo ? formatoHMS(h.msTrabajado) : "",
         };
       });
-      const wsFichajes = XLSX.utils.json_to_sheet(filasFichajes);
-      fichajesOrdenados.forEach((f, i) => { if (f.automatico) pintarFilaRoja(wsFichajes, i, 7); });
+      const wsFichajes = hojaConNota(filasFichajes, notaRango);
+      fichajesOrdenados.forEach((f, i) => {
+        if (f.automatico) { pintarFilaRoja(wsFichajes, i, 7); return; }
+        const clave = f.userId + "|" + f.date;
+        const h = horasPorFichajes[clave];
+        if (h && h.idUltimo === f.id && h.sinRedondear) pintarCeldaRoja(wsFichajes, i, 6);
+      });
       conFiltro(wsFichajes);
-      XLSX.utils.book_append_sheet(wb, wsFichajes, "FICHAJES");
+      XLSX.utils.book_append_sheet(wb, wsFichajes, "FICHAJES REALES");
 
-      const wsConcepto = conFiltro(XLSX.utils.json_to_sheet(pivotPorConcepto()));
+      const wsConcepto = conFiltro(hojaConNota(pivotPorConcepto(), notaRango));
       XLSX.utils.book_append_sheet(wb, wsConcepto, "IMPUTACION GENERAL");
-
-      const wsConceptoAnual = conFiltro(XLSX.utils.json_to_sheet(pivotPorConceptoDe(imputacionesAnio)));
-      XLSX.utils.book_append_sheet(wb, wsConceptoAnual, "IMPUTACION GENERAL ACUMULADO");
-
-      const wsHorasDia = conFiltro(XLSX.utils.json_to_sheet(pivotHorasPorTrabajador()));
-      XLSX.utils.book_append_sheet(wb, wsHorasDia, "IMPUTACION HORAS POR DÍA");
 
       const sufijoEmpresa = empresaFiltro === "todas" ? "" : `_${empresaFiltro}`;
       XLSX.writeFile(wb, `informe_${desde}_a_${hasta}${sufijoEmpresa}.xlsx`);
@@ -1692,6 +1770,41 @@ function GestionFrases({ api, showToast }) {
           </div>
         ))}
         {frases.length === 0 && <div style={{ color: "var(--muted)", fontSize: 13 }}>Todavía no hay ninguna frase — añade la primera arriba.</div>}
+      </div>
+    </div>
+  );
+}
+
+function GestionHorario({ api, config, refreshConfig, showToast }) {
+  const [lunJue, setLunJue] = useState(config?.horario?.lunJue || "");
+  const [viernes, setViernes] = useState(config?.horario?.viernes || "");
+  const [guardando, setGuardando] = useState(false);
+
+  useEffect(() => { setLunJue(config?.horario?.lunJue || ""); setViernes(config?.horario?.viernes || ""); }, [config]);
+
+  const guardar = async () => {
+    setGuardando(true);
+    try { await api("PATCH", "/api/admin/horario", { lunJue, viernes }); refreshConfig(); showToast("Horario actualizado."); }
+    catch (e) { showToast(e.message || "No se pudo guardar."); }
+    setGuardando(false);
+  };
+
+  return (
+    <div className="card">
+      <h3 style={{ fontSize: 14, marginBottom: 4 }}>Horario laboral habitual</h3>
+      <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 0, marginBottom: 14 }}>
+        Es el mismo para todos los trabajadores. Se muestra tal cual en la pantalla de Fichaje de todos, así que escríbelo ya con el formato que quieras que vean (horas, pausas, etc.).
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div>
+          <label style={{ fontSize: 12.5, fontWeight: 600, color: "var(--muted)" }}>Lunes a jueves</label>
+          <input className="input" style={{ marginTop: 6 }} value={lunJue} onChange={(e) => setLunJue(e.target.value)} />
+        </div>
+        <div>
+          <label style={{ fontSize: 12.5, fontWeight: 600, color: "var(--muted)" }}>Viernes</label>
+          <input className="input" style={{ marginTop: 6 }} value={viernes} onChange={(e) => setViernes(e.target.value)} />
+        </div>
+        <button className="btn btn-primary" style={{ alignSelf: "flex-start" }} onClick={guardar} disabled={guardando}><Check size={14} /> {guardando ? "Guardando…" : "Guardar horario"}</button>
       </div>
     </div>
   );
