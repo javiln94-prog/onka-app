@@ -1200,10 +1200,12 @@ function redondearHoraInfo(horaStr, anclas) {
 }
 
 // Por cada trabajador y día: suma cada tramo trabajado (entrada→salida) por
-// separado, redondeando cada hora a la prevista si está a ±20 min, y resta el
-// almuerzo de 30 min (L-V) solo si la entrada del día, ya redondeada, es
-// antes de las 11:00. Así el hueco real de la comida queda excluido solo,
-// sin depender de una hora fija de comida.
+// separado. "Horas totales" usa las horas reales tal cual se ficharon;
+// "Horas totales trabajadas" redondea cada hora a la prevista si está a
+// ±20 min. En ambas se resta el almuerzo de 30 min (L-V) solo si la entrada
+// del día (real o redondeada, según corresponda) es antes de las 11:00. Así
+// el hueco real de la comida queda excluido solo en las dos, sin depender de
+// una hora fija de comida.
 function calcularHorasPorFichajes(fichajesArr) {
   const porClave = {};
   fichajesArr.forEach((f) => { const k = f.userId + "|" + f.date; (porClave[k] = porClave[k] || []).push(f); });
@@ -1216,8 +1218,8 @@ function calcularHorasPorFichajes(fichajesArr) {
     if (!entradas.length || !salidas.length) return;
     const primeraEntrada = entradas[0];
     const ultimaSalida = salidas[salidas.length - 1];
-    const msTotal = new Date(ultimaSalida.timestamp) - new Date(primeraEntrada.timestamp);
-    if (msTotal <= 0) return;
+    const msSpan = new Date(ultimaSalida.timestamp) - new Date(primeraEntrada.timestamp);
+    if (msSpan <= 0) return;
 
     const diaSemana = new Date(fecha + "T00:00:00").getDay(); // 0 domingo ... 6 sábado
     const esLunJue = diaSemana >= 1 && diaSemana <= 4;
@@ -1225,30 +1227,38 @@ function calcularHorasPorFichajes(fichajesArr) {
     const anclas = esLunJue ? ANCLAS_HORARIO.lunJue : (esViernes ? ANCLAS_HORARIO.viernes : []);
 
     // Sumar cada tramo entrada→salida por separado (así el hueco real de la
-    // comida, que no coincide siempre exactamente con 14:00-15:00, no cuenta).
-    // De paso, apuntamos si alguna hora no se pudo redondear (llegó/se fue a
-    // más de 20 min de la hora prevista) para poder avisar de ello luego.
-    let msTrabajado = 0;
+    // comida, que no coincide siempre exactamente con 14:00-15:00, no cuenta),
+    // tanto con las horas reales como con las redondeadas.
+    let msTotal = 0;      // tramos reales, sin redondear
+    let msTrabajado = 0;  // tramos redondeados a la hora prevista
     let entradaAbierta = null;
     let algunaSinRedondear = false;
     ordenados.forEach((r) => {
       if (r.type === "entrada") {
         entradaAbierta = r;
       } else if (r.type === "salida" && entradaAbierta) {
+        const msIniReal = new Date(entradaAbierta.timestamp).getTime();
+        const msFinReal = new Date(r.timestamp).getTime();
+        if (msFinReal > msIniReal) msTotal += msFinReal - msIniReal;
+
         const eIn = redondearHoraInfo(entradaAbierta.time, anclas);
         const eOut = redondearHoraInfo(r.time, anclas);
         if (anclas.length && (!eIn.redondeada || !eOut.redondeada)) algunaSinRedondear = true;
-        const msIni = new Date(`${fecha}T${eIn.valor}`).getTime();
-        const msFin = new Date(`${fecha}T${eOut.valor}`).getTime();
-        if (msFin > msIni) msTrabajado += msFin - msIni;
+        const msIniRed = new Date(`${fecha}T${eIn.valor}`).getTime();
+        const msFinRed = new Date(`${fecha}T${eOut.valor}`).getTime();
+        if (msFinRed > msIniRed) msTrabajado += msFinRed - msIniRed;
+
         entradaAbierta = null;
       }
     });
 
-    // Almuerzo de 30 min: se resta solo si la entrada (redondeada) es antes de las 11:00
-    if ((esLunJue || esViernes) && redondearHora(primeraEntrada.time, anclas) < "11:00:00") {
-      msTrabajado -= 30 * 60000;
+    // Almuerzo de 30 min: se resta en cada columna según su propio criterio
+    // de entrada (real para "Horas totales", redondeada para "trabajadas").
+    if (esLunJue || esViernes) {
+      if (primeraEntrada.time < "11:00:00") msTotal -= 30 * 60000;
+      if (redondearHora(primeraEntrada.time, anclas) < "11:00:00") msTrabajado -= 30 * 60000;
     }
+    if (msTotal < 0) msTotal = 0;
     if (msTrabajado < 0) msTrabajado = 0;
 
     resultado[clave] = { msTotal, msTrabajado, horasTrabajadasDecimal: Math.round((msTrabajado / 3600000) * 100) / 100, idUltimo: ultimaSalida.id, sinRedondear: algunaSinRedondear };
