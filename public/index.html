@@ -148,6 +148,7 @@ const ONKA_LOGO_PLACEHOLDER = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAB9k
 const pad = (n) => String(n).padStart(2, "0");
 const toISODate = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const todayISO = () => toISODate(new Date());
+const fechaDMA = (iso) => (iso ? iso.split("-").reverse().join("/") : iso);
 const fmtTime = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 const isWeekend = (isoDate) => { const d = new Date(isoDate + "T00:00:00"); const day = d.getDay(); return day === 0 || day === 6; };
 const DIAS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
@@ -474,7 +475,7 @@ function Fichaje({ api, user, misFichajes, refresh, showToast, events, config })
               {proximosEventos.map((e) => (
                 <div key={e.id} style={{ borderLeft: `3px solid ${colorDeEvento(e)}`, paddingLeft: 8 }}>
                   <div style={{ fontSize: 13, fontWeight: 700 }}>{e.title || TIPO_EVENTO[e.type].label}</div>
-                  <div className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>{e.date}{e.time ? " · " + e.time : ""}{e.location ? " · " + e.location : ""}</div>
+                  <div className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>{fechaDMA(e.date)}{e.time ? " · " + e.time : ""}{e.location ? " · " + e.location : ""}</div>
                 </div>
               ))}
             </div>
@@ -491,8 +492,8 @@ function Fichaje({ api, user, misFichajes, refresh, showToast, events, config })
             <tbody>
               {historialSemana.map((f) => (
                 <tr key={f.id} style={{ whiteSpace: "nowrap" }}>
-                  <td className="mono">{f.date}</td><td className="mono">{f.time.slice(0, 5)}</td>
-                  <td><span className="pill" style={{ background: f.type === "entrada" ? "#E7F3EC" : "#FBEAEA", color: f.type === "entrada" ? "var(--ok)" : "var(--warn)" }}>{f.type}{f.automatico ? " · auto" : ""}</span></td>
+                  <td className="mono">{fechaDMA(f.date)}</td><td className="mono">{f.time.slice(0, 5)}</td>
+                  <td><span className="pill" style={{ background: f.type === "entrada" ? "#E7F3EC" : "#FBEAEA", color: f.type === "entrada" ? "var(--ok)" : "var(--warn)" }}>{f.type === "entrada" ? "E" : "S"}{f.automatico ? " · auto" : ""}</span></td>
                   <td className="td-clip"><UbicacionCelda f={f} /></td>
                 </tr>
               ))}
@@ -791,7 +792,7 @@ function ImputacionHoras({ api, user, config, showToast }) {
           <table>
             <thead><tr><th>Fecha</th><th>Concepto</th><th>Horas</th><th></th></tr></thead>
             <tbody>
-              {historial.map((i) => <tr key={i.id}><td className="mono">{i.date}</td><td>{i.projectName}</td><td className="mono">{i.hours}h</td><td>{i.excedente && <span className="pill" style={{ background: "#FBF0DC", color: "var(--accent-ink)" }}>excedente</span>}</td></tr>)}
+              {historial.map((i) => <tr key={i.id}><td className="mono">{fechaDMA(i.date)}</td><td>{i.projectName}</td><td className="mono">{i.hours}h</td><td>{i.excedente && <span className="pill" style={{ background: "#FBF0DC", color: "var(--accent-ink)" }}>excedente</span>}</td></tr>)}
               {historial.length === 0 && <tr><td colSpan={4} style={{ color: "var(--muted)", textAlign: "center", padding: 16 }}>Todavía no hay imputaciones.</td></tr>}
             </tbody>
           </table>
@@ -940,7 +941,7 @@ function Calendario({ api, user, events, refreshEvents, config }) {
           {events.filter((e) => e.date >= todayISO()).sort((a, b) => (a.date > b.date ? 1 : -1)).slice(0, 20).map((e) => (
             <div key={e.id} style={{ borderLeft: `3px solid ${colorDeEvento(e)}`, paddingLeft: 8, cursor: "pointer" }} onClick={() => setDiaSel(e.date)}>
               <div style={{ fontSize: 12.5, fontWeight: 700 }}>{e.title || TIPO_EVENTO[e.type].label}</div>
-              <div className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>{e.date}{e.time ? " · " + e.time : ""} · {TIPO_EVENTO[e.type].label}</div>
+              <div className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>{fechaDMA(e.date)}{e.time ? " · " + e.time : ""} · {TIPO_EVENTO[e.type].label}</div>
             </div>
           ))}
           {events.filter((e) => e.date >= todayISO()).length === 0 && <div style={{ color: "var(--muted)", fontSize: 12.5 }}>No hay eventos próximos.</div>}
@@ -978,7 +979,7 @@ function DayModal({ fecha, eventos, isAdmin, users, onClose, onAdd, onDelete }) 
     <div style={{ position: "fixed", inset: 0, background: "rgba(20,25,35,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16 }} onClick={onClose}>
       <div className="card scrollbar" style={{ width: 460, maxWidth: "100%", maxHeight: "88vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <h3 style={{ fontSize: 16 }} className="mono">{fecha}</h3>
+          <h3 style={{ fontSize: 16 }} className="mono">{fechaDMA(fecha)}</h3>
           <button className="btn btn-ghost btn-sm" onClick={onClose}><X size={14} /></button>
         </div>
 
