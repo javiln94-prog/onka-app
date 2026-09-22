@@ -1165,7 +1165,7 @@ function formatoHMS(ms) {
 // los horarios de la empresa de forma duradera, avisa para actualizar esto también.
 const ANCLAS_HORARIO = {
   lunJue: ["08:00:00", "14:00:00", "15:00:00", "18:00:00"],
-  viernes: ["08:00:00", "13:30:00"],
+  viernes: ["08:00:00", "13:00:00"],
 };
 const MARGEN_REDONDEO_SEG = 20 * 60; // 20 minutos
 
@@ -1255,8 +1255,8 @@ function calcularHorasPorFichajes(fichajesArr) {
     // Almuerzo de 30 min: se resta en cada columna según su propio criterio
     // de entrada (real para "Horas totales", redondeada para "trabajadas").
     if (esLunJue || esViernes) {
-      if (primeraEntrada.time < "11:00:00") msTotal -= 30 * 60000;
-      if (redondearHora(primeraEntrada.time, anclas) < "11:00:00") msTrabajado -= 30 * 60000;
+      if (primeraEntrada.time < "10:30:00") msTotal -= 30 * 60000;
+      if (redondearHora(primeraEntrada.time, anclas) < "10:30:00") msTrabajado -= 30 * 60000;
     }
     if (msTotal < 0) msTotal = 0;
     if (msTrabajado < 0) msTrabajado = 0;
@@ -1281,8 +1281,8 @@ function pivotFichajesAnual(fichajesArr) {
       totalesMes[mes] += datos.msTrabajado;
     });
     let totalAnio = 0;
-    MESES_CORTOS.forEach((m, i) => { fila[m] = totalesMes[i] > 0 ? formatoHMS(totalesMes[i]) : ""; totalAnio += totalesMes[i]; });
-    fila["Total"] = formatoHMS(totalAnio);
+    MESES_CORTOS.forEach((m, i) => { fila[m] = totalesMes[i] > 0 ? totalesMes[i] / 86400000 : ""; totalAnio += totalesMes[i]; });
+    fila["Total"] = totalAnio / 86400000;
     return fila;
   });
 }
@@ -1302,6 +1302,41 @@ function pivotPorConceptoDe(imputacionesArr) {
     fila["Total"] = total;
     return fila;
   });
+}
+
+// Desglose: filas = concepto + usuario, columnas = cada mes del rango elegido,
+// valor = horas que ese usuario imputó a ese concepto ese mes.
+function pivotPorConceptoUsuarioMes(imputacionesArr, desde, hasta) {
+  const meses = [];
+  const cursor = new Date(desde + "T00:00:00");
+  cursor.setDate(1);
+  const fin = new Date(hasta + "T00:00:00");
+  while (cursor <= fin) {
+    const ym = cursor.getFullYear() + "-" + String(cursor.getMonth() + 1).padStart(2, "0");
+    if (!meses.includes(ym)) meses.push(ym);
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  const etiquetaMes = (ym) => { const [y, m] = ym.split("-"); return MESES_CORTOS[parseInt(m, 10) - 1] + " " + y.slice(2); };
+
+  const combos = new Map(); // "concepto\u0000usuario" -> { concepto, usuario }
+  imputacionesArr.forEach((i) => {
+    const k = i.projectName + "\u0000" + i.userName;
+    if (!combos.has(k)) combos.set(k, { concepto: i.projectName, usuario: i.userName });
+  });
+
+  return [...combos.values()]
+    .sort((a, b) => (a.concepto === b.concepto ? a.usuario.localeCompare(b.usuario) : a.concepto.localeCompare(b.concepto)))
+    .map(({ concepto, usuario }) => {
+      const fila = { Concepto: concepto, Usuario: usuario };
+      let total = 0;
+      meses.forEach((ym) => {
+        const suma = imputacionesArr.filter((i) => i.projectName === concepto && i.userName === usuario && i.date.slice(0, 7) === ym).reduce((s, i) => s + i.hours, 0);
+        fila[etiquetaMes(ym)] = suma > 0 ? suma : "";
+        total += suma;
+      });
+      fila["Total"] = total;
+      return fila;
+    });
 }
 
 // Resumen simplificado y compacto (pensado para verse bien en el móvil):
@@ -1338,7 +1373,7 @@ function resumenImputacionPorConcepto(imputacionesArr) {
 }
 
 function Informes({ api, showToast, config }) {
-  const [desde, setDesde] = useState(toISODate(new Date(new Date().getFullYear(), new Date().getMonth(), 1)));
+  const [desde, setDesde] = useState(toISODate(new Date(new Date().getFullYear(), 0, 1)));
   const [hasta, setHasta] = useState(todayISO());
   const [fichajes, setFichajes] = useState([]);
   const [imputaciones, setImputaciones] = useState([]);
@@ -1402,10 +1437,10 @@ function Informes({ api, showToast, config }) {
         const clave = registro ? registro.userId + "|" + f : null;
         const datos = clave && horasPorFichajes[clave];
         const ms = datos ? datos.msTrabajado : 0;
-        fila[claveDia(f)] = ms > 0 ? formatoHMS(ms) : "";
+        fila[claveDia(f)] = ms > 0 ? ms / 86400000 : "";
         totalMs += ms;
       });
-      fila["Total"] = formatoHMS(totalMs);
+      fila["Total"] = totalMs / 86400000;
       return fila;
     });
   };
@@ -1444,6 +1479,31 @@ function Informes({ api, showToast, config }) {
     return ws;
   };
 
+  // Da formato de hora "de verdad" (sumable, con AutoSuma/promedio en Excel) a
+  // las columnas indicadas — las celdas ya deben venir como número (fracción
+  // de día), no como texto, para que esto funcione.
+  const conFormatoHora = (ws, columnas) => {
+    if (!ws["!ref"]) return ws;
+    const rango = XLSX.utils.decode_range(ws["!ref"]);
+    for (let r = FILAS_NOTA + 1; r <= rango.e.r; r++) {
+      columnas.forEach((c) => {
+        const addr = XLSX.utils.encode_cell({ r, c });
+        const cell = ws[addr];
+        if (cell && cell.t === "n") cell.z = "[h]:mm:ss";
+      });
+    }
+    return ws;
+  };
+  // Igual, pero aplicado a todas las columnas menos la primera (para las
+  // tablas donde cada columna es un día o un mes distinto)
+  const conFormatoHoraTodasMenosPrimera = (ws) => {
+    if (!ws["!ref"]) return ws;
+    const rango = XLSX.utils.decode_range(ws["!ref"]);
+    const columnas = [];
+    for (let c = 1; c <= rango.e.c; c++) columnas.push(c);
+    return conFormatoHora(ws, columnas);
+  };
+
   const [exportando, setExportando] = useState(false);
 
   const exportarExcel = async () => {
@@ -1460,10 +1520,10 @@ function Informes({ api, showToast, config }) {
 
       const wb = XLSX.utils.book_new();
 
-      const wsGeneral = conFiltro(hojaConNota(pivotFichajesGeneral(), notaRango));
+      const wsGeneral = conFormatoHoraTodasMenosPrimera(conFiltro(hojaConNota(pivotFichajesGeneral(), notaRango)));
       XLSX.utils.book_append_sheet(wb, wsGeneral, "FICHAJE MENSUAL");
 
-      const wsGeneralAnual = conFiltro(hojaConNota(pivotFichajesAnual(fichajesAnio), notaAnio));
+      const wsGeneralAnual = conFormatoHoraTodasMenosPrimera(conFiltro(hojaConNota(pivotFichajesAnual(fichajesAnio), notaAnio)));
       XLSX.utils.book_append_sheet(wb, wsGeneralAnual, "FICHAJE ANUAL");
 
       const fichajesOrdenados = [...fichajesF].sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
@@ -1473,8 +1533,8 @@ function Informes({ api, showToast, config }) {
         const esUltimo = h && h.idUltimo === f.id;
         return {
           Usuario: f.userName, Fecha: f.date, Hora: f.time, Tipo: f.type + (f.automatico ? " (auto)" : ""), Ubicación: f.locationLabel || "",
-          "Horas totales": esUltimo ? formatoHMS(h.msTotal) : "",
-          "Horas totales trabajadas": esUltimo ? formatoHMS(h.msTrabajado) : "",
+          "Horas totales": esUltimo ? h.msTotal / 86400000 : "",
+          "Horas totales trabajadas": esUltimo ? h.msTrabajado / 86400000 : "",
         };
       });
       const wsFichajes = hojaConNota(filasFichajes, notaRango);
@@ -1485,10 +1545,14 @@ function Informes({ api, showToast, config }) {
         if (h && h.idUltimo === f.id && h.sinRedondear) pintarCeldaRoja(wsFichajes, i, 6);
       });
       conFiltro(wsFichajes);
+      conFormatoHora(wsFichajes, [5, 6]);
       XLSX.utils.book_append_sheet(wb, wsFichajes, "FICHAJES REALES");
 
       const wsConcepto = conFiltro(hojaConNota(pivotPorConcepto(), notaRango));
       XLSX.utils.book_append_sheet(wb, wsConcepto, "IMPUTACION GENERAL");
+
+      const wsConceptoMes = conFiltro(hojaConNota(pivotPorConceptoUsuarioMes(imputacionesF, desde, hasta), notaRango));
+      XLSX.utils.book_append_sheet(wb, wsConceptoMes, "IMPUTACION POR MES");
 
       const sufijoEmpresa = empresaFiltro === "todas" ? "" : `_${empresaFiltro}`;
       XLSX.writeFile(wb, `informe_${desde}_a_${hasta}${sufijoEmpresa}.xlsx`);
@@ -1540,8 +1604,8 @@ function Informes({ api, showToast, config }) {
         <div className="table-wrap scrollbar" style={{ maxHeight: 320, overflowY: "auto" }}>
           <table><thead><tr><th>Usuario</th><th>Fecha</th><th>Hora</th><th>Tipo</th><th>Ubicación</th></tr></thead><tbody>
             {[...fichajesF].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1)).map((f) => (
-              <tr key={f.id}><td>{f.userName}</td><td className="mono">{f.date}</td><td className="mono">{f.time.slice(0, 5)}</td>
-              <td><span className="pill" style={{ background: f.type === "entrada" ? "#E7F3EC" : "#FBEAEA", color: f.type === "entrada" ? "var(--ok)" : "var(--warn)" }}>{f.type}{f.automatico ? " · auto" : ""}</span></td>
+              <tr key={f.id}><td>{f.userName}</td><td className="mono">{f.date.split("-").reverse().join("/")}</td><td className="mono">{f.time.slice(0, 5)}</td>
+              <td><span className="pill" style={{ background: f.type === "entrada" ? "#E7F3EC" : "#FBEAEA", color: f.type === "entrada" ? "var(--ok)" : "var(--warn)" }}>{f.type === "entrada" ? "E" : "S"}{f.automatico ? " · auto" : ""}</span></td>
               <td className="td-clip"><UbicacionCelda f={f} /></td></tr>
             ))}
           </tbody></table>
