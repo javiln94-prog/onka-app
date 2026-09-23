@@ -1547,6 +1547,27 @@ function Informes({ api, showToast, config }) {
       });
       conFiltro(wsFichajes);
       conFormatoHora(wsFichajes, [5, 6]);
+
+      // Fila de TOTAL al final, ya calculada y con el formato de hora puesto
+      // de fábrica — así una suma no da la vuelta al pasar de 24h.
+      const totalMsTotal = fichajesOrdenados.reduce((s, f) => {
+        const clave = f.userId + "|" + f.date; const h = horasPorFichajes[clave];
+        return s + (h && h.idUltimo === f.id ? h.msTotal : 0);
+      }, 0);
+      const totalMsTrabajado = fichajesOrdenados.reduce((s, f) => {
+        const clave = f.userId + "|" + f.date; const h = horasPorFichajes[clave];
+        return s + (h && h.idUltimo === f.id ? h.msTrabajado : 0);
+      }, 0);
+      const rangoFichajes = XLSX.utils.decode_range(wsFichajes["!ref"]);
+      const filaTotal = rangoFichajes.e.r + 2; // una fila en blanco de separación
+      XLSX.utils.sheet_add_aoa(wsFichajes, [["TOTAL", "", "", "", "", totalMsTotal / 86400000, totalMsTrabajado / 86400000]], { origin: { r: filaTotal, c: 0 } });
+      [0, 5, 6].forEach((c) => {
+        const addr = XLSX.utils.encode_cell({ r: filaTotal, c });
+        if (wsFichajes[addr]) wsFichajes[addr].s = { font: { bold: true } };
+        if ((c === 5 || c === 6) && wsFichajes[addr]) wsFichajes[addr].z = "[h]:mm:ss";
+      });
+      wsFichajes["!ref"] = XLSX.utils.encode_range({ s: rangoFichajes.s, e: { r: filaTotal, c: rangoFichajes.e.c } });
+
       XLSX.utils.book_append_sheet(wb, wsFichajes, "FICHAJES REALES");
 
       const wsConcepto = conFiltro(hojaConNota(pivotPorConcepto(), notaRango));
