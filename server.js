@@ -59,6 +59,7 @@ function seedData() {
     events: [],
     responsablesProyecto: [], // ids de usuarios autorizados a gestionar la familia "proyectos"
     responsablesAuxiliar: [], // ids de usuarios autorizados a gestionar la familia "auxiliares"
+    administradores: [], // ids de usuarios con acceso completo al panel de administración
     frases: [], // frases motivacionales del administrador, visibles en el login
     horario: {
       lunJue: "8:00–10:00 · 10:00–10:30 almuerzo · 10:30–14:00 · 14:00–15:00 comida · 15:00–18:00",
@@ -72,6 +73,7 @@ function seedData() {
 // tienen todos los campos de versiones nuevas de la app, sin borrar nada.
 function migrate(data) {
   if (!data.responsablesAuxiliar) data.responsablesAuxiliar = [];
+  if (!data.administradores) data.administradores = [];
   if (!data.responsablesProyecto) data.responsablesProyecto = [];
   data.events = (data.events || []).map((e) => ({
     time: null, description: "", location: "", invitados: "todos",
@@ -216,8 +218,13 @@ async function auth(req) {
   return { token, ...session };
 }
 function isAdmin(session) { return !!session && session.role === "admin"; }
+// Usuarios marcados como "administradores" tienen acceso completo al panel,
+// igual que el administrador original, sin tener que cambiarles el rol.
+function esAdminCompleto(data, session) {
+  return isAdmin(session) || (data.administradores || []).includes(session.userId);
+}
 function puedeGestionarEventos(data, session) {
-  return isAdmin(session) || data.responsablesProyecto.includes(session.userId) || data.responsablesAuxiliar.includes(session.userId);
+  return esAdminCompleto(data, session) || data.responsablesProyecto.includes(session.userId) || data.responsablesAuxiliar.includes(session.userId);
 }
 
 // El servidor puede estar corriendo en UTC (p. ej. en Render). Calculamos
@@ -365,6 +372,7 @@ async function handleApi(req, res, pathname, query) {
       auxTasks: data.auxTasks,
       responsablesProyecto: data.responsablesProyecto,
       responsablesAuxiliar: data.responsablesAuxiliar,
+      administradores: data.administradores || [],
       users: data.users.map((u) => ({ id: u.id, name: u.name, role: u.role, company: u.company })),
       horario: data.horario,
       me: session,
@@ -372,7 +380,8 @@ async function handleApi(req, res, pathname, query) {
   }
 
   if (pathname === "/api/admin/horario" && req.method === "PATCH") {
-    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    const data = await loadData();
+    if (!esAdminCompleto(data, session)) return sendJSON(res, 403, { error: "Solo el administrador" });
     const body = await readBody(req);
     const updated = await persist((d) => {
       d.horario = { lunJue: String(body.lunJue ?? d.horario.lunJue), viernes: String(body.viernes ?? d.horario.viernes) };
@@ -382,7 +391,7 @@ async function handleApi(req, res, pathname, query) {
   }
 
   // ---- Familia "Proyectos" (oficina + fábrica) ----
-  const puedeProyectos = (data) => isAdmin(session) || data.responsablesProyecto.includes(session.userId);
+  const puedeProyectos = (data) => esAdminCompleto(data, session) || data.responsablesProyecto.includes(session.userId);
   if (pathname === "/api/projects" && req.method === "POST") {
     const data = await loadData();
     if (!puedeProyectos(data)) return sendJSON(res, 403, { error: "No autorizado a crear proyectos" });
@@ -409,7 +418,7 @@ async function handleApi(req, res, pathname, query) {
   }
 
   // ---- Familia "Auxiliares" (solo fábrica) ----
-  const puedeAuxiliar = (data) => isAdmin(session) || data.responsablesAuxiliar.includes(session.userId);
+  const puedeAuxiliar = (data) => esAdminCompleto(data, session) || data.responsablesAuxiliar.includes(session.userId);
   if (pathname === "/api/aux-tasks" && req.method === "POST") {
     const data = await loadData();
     if (!puedeAuxiliar(data)) return sendJSON(res, 403, { error: "No autorizado a crear trabajos auxiliares" });
@@ -435,13 +444,15 @@ async function handleApi(req, res, pathname, query) {
     return sendJSON(res, 200, updated.auxTasks);
   }
 
-  // ---- Usuarios (solo admin) ----
+  // ---- Usuarios (admin o "administradores" completos) ----
   if (pathname === "/api/users" && req.method === "GET") {
-    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
-    return sendJSON(res, 200, (await loadData()).users);
+    const data = await loadData();
+    if (!esAdminCompleto(data, session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    return sendJSON(res, 200, data.users);
   }
   if (pathname === "/api/users" && req.method === "POST") {
-    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    const dataChk = await loadData();
+    if (!esAdminCompleto(dataChk, session)) return sendJSON(res, 403, { error: "Solo el administrador" });
     const body = await readBody(req);
     if (!body.name || !body.name.trim()) return sendJSON(res, 400, { error: "Nombre requerido" });
     const role = ["oficina", "fabrica", "admin"].includes(body.role) ? body.role : "oficina";
@@ -451,7 +462,8 @@ async function handleApi(req, res, pathname, query) {
     return sendJSON(res, 200, updated.users);
   }
   if (pathname.match(/^\/api\/users\/[^/]+$/) && req.method === "PATCH") {
-    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    const dataChk = await loadData();
+    if (!esAdminCompleto(dataChk, session)) return sendJSON(res, 403, { error: "Solo el administrador" });
     const id = pathname.split("/").pop();
     const body = await readBody(req);
     if (body.company !== undefined && !["ONKA", "ALACANT"].includes(body.company)) delete body.company;
@@ -459,35 +471,50 @@ async function handleApi(req, res, pathname, query) {
     return sendJSON(res, 200, updated.users);
   }
   if (pathname.match(/^\/api\/users\/[^/]+$/) && req.method === "DELETE") {
-    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    const dataChk = await loadData();
+    if (!esAdminCompleto(dataChk, session)) return sendJSON(res, 403, { error: "Solo el administrador" });
     const id = pathname.split("/").pop();
     if (id === "u_admin") return sendJSON(res, 400, { error: "No se puede borrar al administrador" });
     const updated = await persist((d) => {
       d.users = d.users.filter((u) => u.id !== id);
       d.responsablesProyecto = d.responsablesProyecto.filter((x) => x !== id);
       d.responsablesAuxiliar = d.responsablesAuxiliar.filter((x) => x !== id);
+      d.administradores = (d.administradores || []).filter((x) => x !== id);
       return d;
     });
     return sendJSON(res, 200, updated.users);
   }
   if (pathname.match(/^\/api\/users\/[^/]+\/responsable-proyecto$/) && req.method === "PATCH") {
-    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    const dataChk = await loadData();
+    if (!esAdminCompleto(dataChk, session)) return sendJSON(res, 403, { error: "Solo el administrador" });
     const id = pathname.split("/")[3];
     const updated = await persist((d) => { d.responsablesProyecto = d.responsablesProyecto.includes(id) ? d.responsablesProyecto.filter((x) => x !== id) : [...d.responsablesProyecto, id]; return d; });
     return sendJSON(res, 200, { responsablesProyecto: updated.responsablesProyecto });
   }
   if (pathname.match(/^\/api\/users\/[^/]+\/responsable-auxiliar$/) && req.method === "PATCH") {
-    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    const dataChk = await loadData();
+    if (!esAdminCompleto(dataChk, session)) return sendJSON(res, 403, { error: "Solo el administrador" });
     const id = pathname.split("/")[3];
     const updated = await persist((d) => { d.responsablesAuxiliar = d.responsablesAuxiliar.includes(id) ? d.responsablesAuxiliar.filter((x) => x !== id) : [...d.responsablesAuxiliar, id]; return d; });
     return sendJSON(res, 200, { responsablesAuxiliar: updated.responsablesAuxiliar });
   }
+  // "Administradores": acceso completo al panel de administración, sin
+  // cambiar el rol de fichaje/imputación de la persona. Solo lo puede tocar
+  // el administrador original (u_admin), no otro "administrador" completo,
+  // para que siempre haya alguien con la última palabra.
+  if (pathname.match(/^\/api\/users\/[^/]+\/administrador$/) && req.method === "PATCH") {
+    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador original" });
+    const id = pathname.split("/")[3];
+    const updated = await persist((d) => { d.administradores = (d.administradores || []).includes(id) ? d.administradores.filter((x) => x !== id) : [...(d.administradores || []), id]; return d; });
+    return sendJSON(res, 200, { administradores: updated.administradores });
+  }
 
-  // ---- Mantenimiento (solo administrador): borra fichajes, imputaciones y
-  // calendario de todos los usuarios, y los proyectos/trabajos que NO sean
-  // recurrentes. Mantiene usuarios, PIN, permisos y los recurrentes (fixed).
+  // ---- Mantenimiento (admin o "administradores" completos): borra fichajes,
+  // imputaciones y calendario de todos los usuarios, y los proyectos/trabajos
+  // que NO sean recurrentes. Mantiene usuarios, PIN, permisos y recurrentes.
   if (pathname === "/api/admin/reset-datos" && req.method === "POST") {
-    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    const dataChk = await loadData();
+    if (!esAdminCompleto(dataChk, session)) return sendJSON(res, 403, { error: "Solo el administrador" });
     const updated = await persist((d) => {
       d.fichajes = [];
       d.imputaciones = [];
@@ -499,13 +526,15 @@ async function handleApi(req, res, pathname, query) {
     return sendJSON(res, 200, { ok: true, projects: updated.projects, auxTasks: updated.auxTasks });
   }
 
-  // ---- Frases motivacionales (solo administrador) ----
+  // ---- Frases motivacionales (admin o "administradores" completos) ----
   if (pathname === "/api/frases" && req.method === "GET") {
-    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
-    return sendJSON(res, 200, (await loadData()).frases || []);
+    const data = await loadData();
+    if (!esAdminCompleto(data, session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    return sendJSON(res, 200, data.frases || []);
   }
   if (pathname === "/api/frases" && req.method === "POST") {
-    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    const dataChk = await loadData();
+    if (!esAdminCompleto(dataChk, session)) return sendJSON(res, 403, { error: "Solo el administrador" });
     const body = await readBody(req);
     if (!body.texto || !body.texto.trim()) return sendJSON(res, 400, { error: "Texto requerido" });
     const item = { id: uid(), texto: body.texto.trim() };
@@ -513,7 +542,8 @@ async function handleApi(req, res, pathname, query) {
     return sendJSON(res, 200, updated.frases);
   }
   if (pathname.match(/^\/api\/frases\/[^/]+$/) && req.method === "DELETE") {
-    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
+    const dataChk = await loadData();
+    if (!esAdminCompleto(dataChk, session)) return sendJSON(res, 403, { error: "Solo el administrador" });
     const id = pathname.split("/").pop();
     const updated = await persist((d) => { d.frases = (d.frases || []).filter((f) => f.id !== id); return d; });
     return sendJSON(res, 200, updated.frases);
@@ -541,7 +571,7 @@ async function handleApi(req, res, pathname, query) {
   }
   if (pathname === "/api/fichajes" && req.method === "GET") {
     const data = await loadData();
-    let rows = isAdmin(session) ? data.fichajes : data.fichajes.filter((f) => f.userId === session.userId);
+    let rows = esAdminCompleto(data, session) ? data.fichajes : data.fichajes.filter((f) => f.userId === session.userId);
     if (query.get("desde")) rows = rows.filter((f) => f.date >= query.get("desde"));
     if (query.get("hasta")) rows = rows.filter((f) => f.date <= query.get("hasta"));
     return sendJSON(res, 200, rows);
@@ -577,8 +607,8 @@ async function handleApi(req, res, pathname, query) {
     return sendJSON(res, 200, nuevas);
   }
   if (pathname === "/api/imputaciones/report" && req.method === "GET") {
-    if (!isAdmin(session)) return sendJSON(res, 403, { error: "Solo el administrador" });
     const data = await loadData();
+    if (!esAdminCompleto(data, session)) return sendJSON(res, 403, { error: "Solo el administrador" });
     let rows = data.imputaciones;
     if (query.get("desde")) rows = rows.filter((i) => i.date >= query.get("desde"));
     if (query.get("hasta")) rows = rows.filter((i) => i.date <= query.get("hasta"));
@@ -588,7 +618,7 @@ async function handleApi(req, res, pathname, query) {
   // ---- Calendario ----
   if (pathname === "/api/events" && req.method === "GET") {
     const data = await loadData();
-    const visibles = isAdmin(session) ? data.events : data.events.filter((e) => e.invitados === "todos" || (Array.isArray(e.invitados) && e.invitados.includes(session.userId)));
+    const visibles = esAdminCompleto(data, session) ? data.events : data.events.filter((e) => e.invitados === "todos" || (Array.isArray(e.invitados) && e.invitados.includes(session.userId)));
     return sendJSON(res, 200, visibles);
   }
   if (pathname === "/api/events" && req.method === "POST") {
