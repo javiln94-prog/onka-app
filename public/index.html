@@ -373,9 +373,10 @@ function Login({ onLogin }) {
    SHELL / NAVEGACIÓN
 ================================================================= */
 function Shell({ user, api, tab, setTab, onLogout, config, refreshConfig, events, refreshEvents, showToast }) {
-  const isAdmin = user.role === "admin";
-  const puedeProyectos = isAdmin || (config && config.responsablesProyecto.includes(user.id));
-  const puedeAuxiliar = isAdmin || (config && config.responsablesAuxiliar.includes(user.id));
+  const esAdminRol = user.role === "admin";
+  const esAdminCompleto = esAdminRol || (config && (config.administradores || []).includes(user.id));
+  const puedeProyectos = esAdminCompleto || (config && config.responsablesProyecto.includes(user.id));
+  const puedeAuxiliar = esAdminCompleto || (config && config.responsablesAuxiliar.includes(user.id));
   const puedeGestion = puedeProyectos || puedeAuxiliar;
   const roleLabel = { admin: "Administrador", oficina: "Oficina", fabrica: "Fábrica" }[user.role];
   const pillClass = { admin: "pill-admin", oficina: "pill-office", fabrica: "pill-fabrica" }[user.role];
@@ -405,7 +406,7 @@ function Shell({ user, api, tab, setTab, onLogout, config, refreshConfig, events
           <div className={`tab ${tab === "fichaje" ? "active" : ""}`} onClick={() => setTab("fichaje")}><Clock size={15} /> Fichaje</div>
           <div className={`tab ${tab === "horas" ? "active" : ""}`} onClick={() => setTab("horas")}><FolderKanban size={15} /> Imputación</div>
           <div className={`tab ${tab === "calendario" ? "active" : ""}`} onClick={() => setTab("calendario")}><CalIcon size={15} /> Calendario</div>
-          {puedeGestion && <div className={`tab ${tab === "admin" ? "active" : ""}`} onClick={() => setTab("admin")}><Settings size={15} /> {isAdmin ? "Administración" : "Gestión"}</div>}
+          {puedeGestion && <div className={`tab ${tab === "admin" ? "active" : ""}`} onClick={() => setTab("admin")}><Settings size={15} /> {esAdminCompleto ? "Administración" : "Gestión"}</div>}
         </div>
       </div>
 
@@ -413,7 +414,7 @@ function Shell({ user, api, tab, setTab, onLogout, config, refreshConfig, events
         {tab === "fichaje" && <Fichaje api={api} user={user} misFichajes={misFichajes} refresh={refreshMisFichajes} showToast={showToast} events={events} config={config} />}
         {tab === "horas" && <ImputacionHoras api={api} user={user} config={config} showToast={showToast} />}
         {tab === "calendario" && <Calendario api={api} user={user} events={events} refreshEvents={refreshEvents} config={config} />}
-        {tab === "admin" && puedeGestion && <Admin api={api} config={config} refreshConfig={refreshConfig} showToast={showToast} isAdmin={isAdmin} puedeProyectos={puedeProyectos} puedeAuxiliar={puedeAuxiliar} />}
+        {tab === "admin" && puedeGestion && <Admin api={api} config={config} refreshConfig={refreshConfig} showToast={showToast} isAdmin={esAdminCompleto} esAdminRol={esAdminRol} puedeProyectos={puedeProyectos} puedeAuxiliar={puedeAuxiliar} />}
       </div>
     </div>
   );
@@ -480,6 +481,13 @@ function Fichaje({ api, user, misFichajes, refresh, showToast, events, config })
               ))}
             </div>
           )}
+        </div>
+      </div>
+
+      <div className="card" style={{ borderColor: "#F0C9A8", background: "#FFF6EC", display: "flex", gap: 10, alignItems: "flex-start" }}>
+        <AlertTriangle size={18} color="var(--accent-ink)" style={{ flexShrink: 0, marginTop: 2 }} />
+        <div style={{ fontSize: 13, lineHeight: 1.5 }}>
+          <strong>Ficha solo la entrada y la salida del trabajo.</strong> No hace falta que fiches para ir a comer ni al volver — esa hora ya está descontada automáticamente.
         </div>
       </div>
 
@@ -1121,7 +1129,7 @@ function FormularioEvento({ fecha, users, onCancel, onSave }) {
 /* =================================================================
    ADMINISTRACIÓN
 ================================================================= */
-function Admin({ api, config, refreshConfig, showToast, isAdmin, puedeProyectos, puedeAuxiliar }) {
+function Admin({ api, config, refreshConfig, showToast, isAdmin, esAdminRol, puedeProyectos, puedeAuxiliar }) {
   const tabsDisponibles = [
     isAdmin && ["informes", "Informes", <Download size={14} key="i" />],
     isAdmin && ["usuarios", "Usuarios", <Users size={14} key="u" />],
@@ -1140,7 +1148,7 @@ function Admin({ api, config, refreshConfig, showToast, isAdmin, puedeProyectos,
         ))}
       </div>
       {sub === "informes" && isAdmin && <Informes api={api} showToast={showToast} config={config} />}
-      {sub === "usuarios" && isAdmin && <GestionUsuarios api={api} refreshConfig={refreshConfig} showToast={showToast} />}
+      {sub === "usuarios" && isAdmin && <GestionUsuarios api={api} refreshConfig={refreshConfig} showToast={showToast} esAdminRol={esAdminRol} />}
       {sub === "proyectos" && puedeProyectos && <GestionFamilia api={api} config={config} refreshConfig={refreshConfig} showToast={showToast} familia="proyectos" />}
       {sub === "auxiliar" && puedeAuxiliar && <GestionFamilia api={api} config={config} refreshConfig={refreshConfig} showToast={showToast} familia="auxiliares" />}
       {sub === "frases" && isAdmin && <GestionFrases api={api} showToast={showToast} />}
@@ -1204,9 +1212,11 @@ function redondearHoraInfo(horaStr, anclas) {
 // separado. "Horas totales" usa las horas reales tal cual se ficharon;
 // "Horas totales trabajadas" redondea cada hora a la prevista si está a
 // ±20 min. En ambas se resta el almuerzo de 30 min (L-V) solo si la entrada
-// del día (real o redondeada, según corresponda) es antes de las 11:00. Así
-// el hueco real de la comida queda excluido solo en las dos, sin depender de
-// una hora fija de comida.
+// del día (real o redondeada, según corresponda) es antes de las 10:30. Como
+// ya no se ficha la entrada/salida de la comida, "Horas totales trabajadas"
+// resta además 1h de comida de lunes a jueves (el viernes no, la jornada
+// termina antes de comer), siempre que la jornada redondeada llegue a cubrir
+// ese hueco (antes de las 14:00 y después de las 15:00).
 function calcularHorasPorFichajes(fichajesArr) {
   const porClave = {};
   fichajesArr.forEach((f) => { const k = f.userId + "|" + f.date; (porClave[k] = porClave[k] || []).push(f); });
@@ -1258,6 +1268,18 @@ function calcularHorasPorFichajes(fichajesArr) {
     if (esLunJue || esViernes) {
       if (primeraEntrada.time < "10:30:00") msTotal -= 30 * 60000;
       if (redondearHora(primeraEntrada.time, anclas) < "10:30:00") msTrabajado -= 30 * 60000;
+    }
+
+    // Comida de 1h (solo lunes a jueves; el viernes la jornada termina antes
+    // de comer). Ya no se ficha la salida/entrada de la comida, así que se
+    // descuenta siempre que la jornada (redondeada) llegue a cubrir ese hueco
+    // — entrada antes de las 14:00 y salida después de las 15:00 — para no
+    // restársela a quien se va antes de esa hora. Solo afecta a "Horas
+    // totales trabajadas"; "Horas totales" sigue reflejando el fichaje real.
+    if (esLunJue) {
+      const entradaRedondeada = redondearHora(primeraEntrada.time, anclas);
+      const salidaRedondeada = redondearHora(ultimaSalida.time, anclas);
+      if (entradaRedondeada < "14:00:00" && salidaRedondeada > "15:00:00") msTrabajado -= 60 * 60000;
     }
     if (msTotal < 0) msTotal = 0;
     if (msTrabajado < 0) msTrabajado = 0;
@@ -1576,6 +1598,9 @@ function Informes({ api, showToast, config }) {
       const wsConceptoMes = conFiltro(hojaConNota(pivotPorConceptoUsuarioMes(imputacionesF, desde, hasta), notaRango));
       XLSX.utils.book_append_sheet(wb, wsConceptoMes, "IMPUTACION POR MES");
 
+      const wsExcedentes = conFiltro(hojaConNota(pivotPorConceptoUsuarioMes(imputacionesF.filter((i) => i.excedente), desde, hasta), notaRango));
+      XLSX.utils.book_append_sheet(wb, wsExcedentes, "EXCEDENTES");
+
       const sufijoEmpresa = empresaFiltro === "todas" ? "" : `_${empresaFiltro}`;
       XLSX.writeFile(wb, `informe_${desde}_a_${hasta}${sufijoEmpresa}.xlsx`);
     } catch (e) {
@@ -1680,10 +1705,11 @@ function TablaPivote({ datos, primeraColumna }) {
   );
 }
 
-function GestionUsuarios({ api, refreshConfig, showToast }) {
+function GestionUsuarios({ api, refreshConfig, showToast, esAdminRol }) {
   const [usuarios, setUsuarios] = useState([]);
   const [respProy, setRespProy] = useState([]);
   const [respAux, setRespAux] = useState([]);
+  const [administradores, setAdministradores] = useState([]);
   const [nombre, setNombre] = useState("");
   const [role, setRole] = useState("oficina");
   const [pin, setPin] = useState("1234");
@@ -1691,7 +1717,7 @@ function GestionUsuarios({ api, refreshConfig, showToast }) {
 
   const cargar = useCallback(() => {
     api("GET", "/api/users").then(setUsuarios).catch(() => {});
-    api("GET", "/api/config").then((c) => { setRespProy(c.responsablesProyecto); setRespAux(c.responsablesAuxiliar); }).catch(() => {});
+    api("GET", "/api/config").then((c) => { setRespProy(c.responsablesProyecto); setRespAux(c.responsablesAuxiliar); setAdministradores(c.administradores || []); }).catch(() => {});
   }, [api]);
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -1699,6 +1725,7 @@ function GestionUsuarios({ api, refreshConfig, showToast }) {
   const delUser = async (id) => { await api("DELETE", "/api/users/" + id); cargar(); refreshConfig(); };
   const toggleRespProy = async (id) => { await api("PATCH", `/api/users/${id}/responsable-proyecto`); cargar(); refreshConfig(); };
   const toggleRespAux = async (id) => { await api("PATCH", `/api/users/${id}/responsable-auxiliar`); cargar(); refreshConfig(); };
+  const toggleAdministrador = async (id) => { try { await api("PATCH", `/api/users/${id}/administrador`); cargar(); refreshConfig(); } catch (e) { showToast(e.message); } };
   const cambiarEmpresa = async (id, nuevaEmpresa) => { await api("PATCH", `/api/users/${id}`, { company: nuevaEmpresa }); cargar(); refreshConfig(); };
 
   const roleLabels = { admin: "Administrador", oficina: "Oficina", fabrica: "Fábrica" };
@@ -1748,6 +1775,7 @@ function GestionUsuarios({ api, refreshConfig, showToast }) {
                   <>
                     <button className={`btn btn-sm ${respProy.includes(u.id) ? "btn-accent" : "btn-ghost"}`} onClick={() => toggleRespProy(u.id)}><ShieldCheck size={13} /> Resp. proyectos</button>
                     <button className={`btn btn-sm ${respAux.includes(u.id) ? "btn-accent" : "btn-ghost"}`} onClick={() => toggleRespAux(u.id)}><ShieldCheck size={13} /> Resp. auxiliares</button>
+                    {esAdminRol && <button className={`btn btn-sm ${administradores.includes(u.id) ? "btn-primary" : "btn-ghost"}`} onClick={() => toggleAdministrador(u.id)} title="Acceso completo al panel de administración"><Settings size={13} /> Administrador</button>}
                   </>
                 )}
               </div>
