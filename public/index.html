@@ -47,6 +47,7 @@
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone@7.29.7/babel.min.js"></script>
 <script src="https://unpkg.com/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+<script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
 <script>
   // Si por lo que sea (red lenta, bloqueador de contenido, etc.) alguna de las
   // librerías de arriba no llega a cargar, sin esto la pantalla se queda en
@@ -1160,6 +1161,39 @@ function Admin({ api, config, refreshConfig, showToast, isAdmin, esAdminRol, pue
 
 const MESES_CORTOS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
 
+// La librería de Excel que usamos (versión gratuita) no sabe "inmovilizar
+// paneles", así que se lo inyectamos nosotros al XML de la hoja ya generada.
+// Deja fija la primera columna (A) y nada más.
+function inmovilizarPrimeraColumnaXml(xml) {
+  const vistas = '<sheetViews><sheetView tabSelected="1" workbookViewId="0"><pane xSplit="1" topLeftCell="B1" activePane="topRight" state="frozen"/><selection pane="topRight" activeCell="B1" sqref="B1"/></sheetView></sheetViews>';
+  if (/<sheetViews>[\s\S]*?<\/sheetViews>/.test(xml)) return xml.replace(/<sheetViews>[\s\S]*?<\/sheetViews>/, vistas);
+  if (/<dimension[^>]*\/>/.test(xml)) return xml.replace(/(<dimension[^>]*\/>)/, "$1" + vistas);
+  return null; // no sabemos dónde ponerlo: mejor no tocar nada
+}
+
+// Guarda el libro de Excel. La PRIMERA hoja sale con la primera columna
+// inmovilizada. Si algo falla, se descarga igualmente el Excel normal.
+async function guardarXlsx(wb, nombreArchivo) {
+  try {
+    if (typeof JSZip === "undefined") throw new Error("JSZip no disponible");
+    const datos = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    const zip = await JSZip.loadAsync(datos);
+    const ruta = "xl/worksheets/sheet1.xml";
+    const xml = await zip.file(ruta).async("string");
+    const nuevo = inmovilizarPrimeraColumnaXml(xml);
+    if (!nuevo) throw new Error("no se pudo inmovilizar");
+    zip.file(ruta, nuevo);
+    const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = nombreArchivo;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  } catch (e) {
+    XLSX.writeFile(wb, nombreArchivo);
+  }
+}
+
 function formatoHMS(ms) {
   if (ms == null || ms < 0) ms = 0;
   const totalSeg = Math.round(ms / 1000);
@@ -1544,7 +1578,6 @@ function Informes({ api, showToast, config }) {
       const wb = XLSX.utils.book_new();
 
       const wsGeneral = conFormatoHoraTodasMenosPrimera(conFiltro(hojaConNota(pivotFichajesGeneral(), notaRango)));
-      wsGeneral["!freeze"] = { xSplit: "1", ySplit: "0", topLeftCell: "B1", activePane: "topRight", state: "frozen" };
       XLSX.utils.book_append_sheet(wb, wsGeneral, "FICHAJE MENSUAL");
 
       const wsGeneralAnual = conFormatoHoraTodasMenosPrimera(conFiltro(hojaConNota(pivotFichajesAnual(fichajesAnio), notaAnio)));
@@ -1603,7 +1636,7 @@ function Informes({ api, showToast, config }) {
       XLSX.utils.book_append_sheet(wb, wsExcedentes, "EXCEDENTES");
 
       const sufijoEmpresa = empresaFiltro === "todas" ? "" : `_${empresaFiltro}`;
-      XLSX.writeFile(wb, `informe_${desde}_a_${hasta}${sufijoEmpresa}.xlsx`);
+      await guardarXlsx(wb, `informe_${desde}_a_${hasta}${sufijoEmpresa}.xlsx`);
     } catch (e) {
       showToast(e.message || "No se pudo exportar.");
     }
