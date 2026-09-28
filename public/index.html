@@ -1544,6 +1544,7 @@ function Informes({ api, showToast, config }) {
       const wb = XLSX.utils.book_new();
 
       const wsGeneral = conFormatoHoraTodasMenosPrimera(conFiltro(hojaConNota(pivotFichajesGeneral(), notaRango)));
+      wsGeneral["!freeze"] = { xSplit: "1", ySplit: "0", topLeftCell: "B1", activePane: "topRight", state: "frozen" };
       XLSX.utils.book_append_sheet(wb, wsGeneral, "FICHAJE MENSUAL");
 
       const wsGeneralAnual = conFormatoHoraTodasMenosPrimera(conFiltro(hojaConNota(pivotFichajesAnual(fichajesAnio), notaAnio)));
