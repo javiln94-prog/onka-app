@@ -183,7 +183,7 @@ function useApi(token, onUnauthorized) {
     if (r.status === 401) { onUnauthorized && onUnauthorized(); throw new Error("No autenticado"); }
     let data = null;
     try { data = await r.json(); } catch (e) {}
-    if (!r.ok) throw new Error((data && data.error) || "Error de red");
+    if (!r.ok) { const err = new Error((data && data.error) || "Error de red"); err.status = r.status; throw err; }
     return data;
   }, [token, onUnauthorized]);
 }
@@ -387,6 +387,14 @@ function Shell({ user, api, tab, setTab, onLogout, config, refreshConfig, events
     api("GET", "/api/fichajes").then((rows) => setMisFichajes(rows.filter((f) => f.userId === user.id))).catch(() => {});
   }, [api, user.id]);
   useEffect(() => { refreshMisFichajes(); }, [refreshMisFichajes]);
+  // La app puede quedarse abierta en segundo plano horas: al volver a ella,
+  // se vuelve a pedir la lista para que el botón (entrada/salida) sea el correcto.
+  useEffect(() => {
+    const alVolver = () => { if (document.visibilityState === "visible") refreshMisFichajes(); };
+    document.addEventListener("visibilitychange", alVolver);
+    window.addEventListener("focus", alVolver);
+    return () => { document.removeEventListener("visibilitychange", alVolver); window.removeEventListener("focus", alVolver); };
+  }, [refreshMisFichajes]);
 
   return (
     <div>
@@ -451,7 +459,10 @@ function Fichaje({ api, user, misFichajes, refresh, showToast, events, config })
       await api("POST", "/api/fichajes", { type: proximaAccion, lat: pos?.lat ?? null, lng: pos?.lng ?? null, accuracy: pos?.accuracy ?? null, locationLabel: label });
       setMsg(pos ? `${proximaAccion === "entrada" ? "Entrada" : "Salida"} registrada con ubicación.` : `${proximaAccion === "entrada" ? "Entrada" : "Salida"} registrada, pero no se pudo obtener la ubicación.`);
       refresh();
-    } catch (e) { showToast("No se pudo registrar el fichaje. Comprueba tu conexión."); }
+    } catch (e) {
+      if (e && e.status === 409) { setMsg(e.message); refresh(); }
+      else showToast("No se pudo registrar el fichaje. Comprueba tu conexión.");
+    }
     setBusy(false);
   };
 
@@ -1212,6 +1223,10 @@ const ANCLAS_HORARIO = {
   viernes: ["08:00:00", "13:00:00"],
 };
 const MARGEN_REDONDEO_SEG = 20 * 60; // 20 minutos
+// Si alguien se olvida de fichar la salida, el servidor la cierra solo a las 20:00
+// (queda registrada como automática). Para CALCULAR horas, esa salida se cuenta
+// como el fin de jornada previsto: 18:00 de lunes a jueves y 13:00 los viernes.
+const FIN_JORNADA = { lunJue: "18:00:00", viernes: "13:00:00" };
 
 function horaASegundos(horaStr) {
   const p = horaStr.split(":").map(Number);
@@ -1279,20 +1294,25 @@ function calcularHorasPorFichajes(fichajesArr) {
     let msTrabajado = 0;  // tramos redondeados a la hora prevista
     let entradaAbierta = null;
     let algunaSinRedondear = false;
+    const tramosRedondeados = [];
     ordenados.forEach((r) => {
       if (r.type === "entrada") {
-        entradaAbierta = r;
+        // Si hay dos entradas seguidas (una pulsación repetida), la real es la primera
+        if (!entradaAbierta) entradaAbierta = r;
       } else if (r.type === "salida" && entradaAbierta) {
-        const msIniReal = new Date(entradaAbierta.timestamp).getTime();
-        const msFinReal = new Date(r.timestamp).getTime();
+        // Salida automática (se olvidó de fichar): se da por terminada a la hora de fin de jornada
+        const finPrevisto = r.automatico ? (esLunJue ? FIN_JORNADA.lunJue : (esViernes ? FIN_JORNADA.viernes : null)) : null;
+        const horaSalida = finPrevisto || r.time;
+        const msIniReal = finPrevisto ? new Date(`${fecha}T${entradaAbierta.time}`).getTime() : new Date(entradaAbierta.timestamp).getTime();
+        const msFinReal = finPrevisto ? new Date(`${fecha}T${finPrevisto}`).getTime() : new Date(r.timestamp).getTime();
         if (msFinReal > msIniReal) msTotal += msFinReal - msIniReal;
 
         const eIn = redondearHoraInfo(entradaAbierta.time, anclas);
-        const eOut = redondearHoraInfo(r.time, anclas);
+        const eOut = redondearHoraInfo(horaSalida, anclas);
         if (anclas.length && (!eIn.redondeada || !eOut.redondeada)) algunaSinRedondear = true;
         const msIniRed = new Date(`${fecha}T${eIn.valor}`).getTime();
         const msFinRed = new Date(`${fecha}T${eOut.valor}`).getTime();
-        if (msFinRed > msIniRed) msTrabajado += msFinRed - msIniRed;
+        if (msFinRed > msIniRed) { msTrabajado += msFinRed - msIniRed; tramosRedondeados.push([msIniRed, msFinRed]); }
 
         entradaAbierta = null;
       }
@@ -1306,15 +1326,16 @@ function calcularHorasPorFichajes(fichajesArr) {
     }
 
     // Comida de 1h (solo lunes a jueves; el viernes la jornada termina antes
-    // de comer). Ya no se ficha la salida/entrada de la comida, así que se
-    // descuenta siempre que la jornada (redondeada) llegue a cubrir ese hueco
-    // — entrada antes de las 14:00 y salida después de las 15:00 — para no
-    // restársela a quien se va antes de esa hora. Solo afecta a "Horas
+    // de comer). Ya no se ficha la comida, así que se descuenta cuando hay un
+    // tramo (redondeado) que cubre de corrido de 14:00 a 15:00. Si la persona sí
+    // fichó la salida y la entrada de la comida, ese hueco ya queda fuera de los
+    // tramos por sí solo y NO se vuelve a restar (evita descontarla dos veces).
+    // Quien se va antes de las 15:00 tampoco la pierde. Solo afecta a "Horas
     // totales trabajadas"; "Horas totales" sigue reflejando el fichaje real.
     if (esLunJue) {
-      const entradaRedondeada = redondearHora(primeraEntrada.time, anclas);
-      const salidaRedondeada = redondearHora(ultimaSalida.time, anclas);
-      if (entradaRedondeada < "14:00:00" && salidaRedondeada > "15:00:00") msTrabajado -= 60 * 60000;
+      const ventIni = new Date(`${fecha}T14:00:00`).getTime();
+      const ventFin = new Date(`${fecha}T15:00:00`).getTime();
+      if (tramosRedondeados.some(([i, f]) => i <= ventIni && f >= ventFin)) msTrabajado -= 60 * 60000;
     }
     if (msTotal < 0) msTotal = 0;
     if (msTrabajado < 0) msTrabajado = 0;
@@ -1428,6 +1449,34 @@ function resumenImputacionPorConcepto(imputacionesArr) {
   return Object.entries(acc)
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([concepto, total]) => ({ Concepto: concepto, "Total": Math.round(total * 100) / 100 }));
+}
+
+// Total imputado por trabajador y mes (horas normales + horas excedentes juntas),
+// para el rango de fechas elegido. Una fila por trabajador, una columna por mes.
+function pivotImputacionTotalPorMes(imputacionesArr, desde, hasta) {
+  const meses = [];
+  const cursor = new Date(desde + "T00:00:00");
+  cursor.setDate(1);
+  const fin = new Date(hasta + "T00:00:00");
+  while (cursor <= fin) {
+    const ym = cursor.getFullYear() + "-" + String(cursor.getMonth() + 1).padStart(2, "0");
+    if (!meses.includes(ym)) meses.push(ym);
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  const etiquetaMes = (ym) => { const [y, m] = ym.split("-"); return MESES_CORTOS[parseInt(m, 10) - 1] + " " + y.slice(2); };
+  const redondear2 = (n) => Math.round(n * 100) / 100;
+  const trabajadores = [...new Set(imputacionesArr.map((i) => i.userName))].sort((a, b) => a.localeCompare(b));
+  return trabajadores.map((usuario) => {
+    const fila = { Trabajador: usuario };
+    let total = 0;
+    meses.forEach((ym) => {
+      const suma = imputacionesArr.filter((i) => i.userName === usuario && i.date.slice(0, 7) === ym).reduce((s, i) => s + i.hours, 0);
+      fila[etiquetaMes(ym)] = suma > 0 ? redondear2(suma) : "";
+      total += suma;
+    });
+    fila["Total"] = redondear2(total);
+    return fila;
+  });
 }
 
 function Informes({ api, showToast, config }) {
@@ -1635,6 +1684,9 @@ function Informes({ api, showToast, config }) {
 
       const wsExcedentes = conFiltro(hojaConNota(pivotPorConceptoUsuarioMes(imputacionesF.filter((i) => i.excedente), desde, hasta), notaRango));
       XLSX.utils.book_append_sheet(wb, wsExcedentes, "EXCEDENTES");
+
+      const wsImputTotal = conFiltro(hojaConNota(pivotImputacionTotalPorMes(imputacionesF, desde, hasta), `${notaRango} — horas imputadas por mes (normales + excedentes)`));
+      XLSX.utils.book_append_sheet(wb, wsImputTotal, "IMPUTACION TOTAL");
 
       const sufijoEmpresa = empresaFiltro === "todas" ? "" : `_${empresaFiltro}`;
       await guardarXlsx(wb, `informe_${desde}_a_${hasta}${sufijoEmpresa}.xlsx`, showToast);
