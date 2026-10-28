@@ -158,13 +158,17 @@ async function saveData(data) {
 }
 
 function persist(mutator) {
-  writeQueue = writeQueue.then(async () => {
+  const trabajo = writeQueue.then(async () => {
     const data = await loadData();
     const result = mutator(data) || data;
     await saveData(result);
     return result;
   });
-  return writeQueue;
+  // La cola sigue viva aunque esta escritura falle (si no, un único fallo
+  // puntual haría fallar TODAS las escrituras siguientes hasta reiniciar).
+  // Quien llamó sí recibe el error.
+  writeQueue = trabajo.catch(() => {});
+  return trabajo;
 }
 
 // -----------------------------------------------------------------
@@ -558,7 +562,7 @@ async function handleApi(req, res, pathname, query) {
     const { date: hoyMadrid, time: horaMadrid } = madridParts(now);
     const record = {
       id: uid(), userId: session.userId, userName: me ? me.name : "—",
-      type: body.type === "salida" ? "salida" : "entrada",
+      type: "entrada", // se fija abajo según el último fichaje real de hoy
       date: hoyMadrid, time: horaMadrid,
       timestamp: now.toISOString(),
       lat: typeof body.lat === "number" ? body.lat : null,
@@ -566,7 +570,27 @@ async function handleApi(req, res, pathname, query) {
       accuracy: typeof body.accuracy === "number" ? body.accuracy : null,
       locationLabel: body.locationLabel || null,
     };
-    await persist((d) => { d.fichajes.push(record); return d; });
+    // El servidor es quien manda: mira el último fichaje de hoy de esta persona
+    // (dentro de la cola de escritura, para que dos pulsaciones seguidas no se
+    // crucen). Si el móvil tenía la pantalla desactualizada y pide lo contrario
+    // de lo que toca, no se guarda nada y se le explica.
+    let rechazo = null;
+    await persist((d) => {
+      let ultimo = null;
+      d.fichajes.forEach((f) => { if (f.userId === session.userId && f.date === hoyMadrid && (!ultimo || f.timestamp > ultimo.timestamp)) ultimo = f; });
+      const esperado = !ultimo || ultimo.type === "salida" ? "entrada" : "salida";
+      if ((body.type === "entrada" || body.type === "salida") && body.type !== esperado) { rechazo = { esperado, ultimo }; return d; }
+      record.type = esperado;
+      d.fichajes.push(record);
+      return d;
+    });
+    if (rechazo) {
+      const hh = rechazo.ultimo ? rechazo.ultimo.time.slice(0, 5) : "";
+      const msg = rechazo.esperado === "salida"
+        ? `Ya tenías una ENTRADA registrada hoy a las ${hh}, así que no se ha guardado otra. Tu pantalla estaba desactualizada y ya se ha actualizado: ahora puedes fichar la salida.`
+        : `Ya tenías una SALIDA registrada hoy a las ${hh}, así que no se ha guardado otra. Tu pantalla estaba desactualizada y ya se ha actualizado: ahora puedes fichar la entrada.`;
+      return sendJSON(res, 409, { error: msg, siguiente: rechazo.esperado });
+    }
     return sendJSON(res, 200, record);
   }
   if (pathname === "/api/fichajes" && req.method === "GET") {
