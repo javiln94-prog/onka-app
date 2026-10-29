@@ -1227,6 +1227,25 @@ const MARGEN_REDONDEO_SEG = 20 * 60; // 20 minutos
 // (queda registrada como automática). Para CALCULAR horas, esa salida se cuenta
 // como el fin de jornada previsto: 18:00 de lunes a jueves y 13:00 los viernes.
 const FIN_JORNADA = { lunJue: "18:00:00", viernes: "13:00:00" };
+// Para las horas TRABAJADAS (FICHAJE MENSUAL/ANUAL), quien ficha la primera entrada
+// del día más tarde de las 08:00 cuenta como si hubiera entrado a las 08:00, para
+// que cada día con fichaje sume siempre las mismas horas. "Horas totales" sigue
+// usando la hora real. Solo de lunes a viernes.
+const ENTRADA_JORNADA = "08:00:00";
+// En FICHAJES REALES se marca en rojo la hora de un fichaje fuera de horario:
+// la primera entrada del día después de las 08:30, y cualquier salida después de
+// las 18:30 (lunes a jueves) o de las 13:30 (viernes: media hora tras el fin).
+const UMBRAL_ENTRADA_TARDE = "08:30:00";
+const UMBRAL_SALIDA_TARDE = { lunJue: "18:30:00", viernes: "13:30:00" };
+function fichajeFueraDeHorario(f, esPrimeraEntradaDelDia) {
+  const dia = new Date(f.date + "T00:00:00").getDay();
+  const esLunJue = dia >= 1 && dia <= 4;
+  const esViernes = dia === 5;
+  if (!esLunJue && !esViernes) return false; // fin de semana: no hay horario previsto
+  if (f.type === "entrada") return !!esPrimeraEntradaDelDia && f.time > UMBRAL_ENTRADA_TARDE;
+  if (f.type === "salida") return f.time > (esLunJue ? UMBRAL_SALIDA_TARDE.lunJue : UMBRAL_SALIDA_TARDE.viernes);
+  return false;
+}
 
 function horaASegundos(horaStr) {
   const p = horaStr.split(":").map(Number);
@@ -1295,6 +1314,7 @@ function calcularHorasPorFichajes(fichajesArr) {
     let entradaAbierta = null;
     let algunaSinRedondear = false;
     const tramosRedondeados = [];
+    let primeraEntradaContada = null; // hora desde la que se cuenta la primera entrada del día
     ordenados.forEach((r) => {
       if (r.type === "entrada") {
         // Si hay dos entradas seguidas (una pulsación repetida), la real es la primera
@@ -1307,7 +1327,13 @@ function calcularHorasPorFichajes(fichajesArr) {
         const msFinReal = finPrevisto ? new Date(`${fecha}T${finPrevisto}`).getTime() : new Date(r.timestamp).getTime();
         if (msFinReal > msIniReal) msTotal += msFinReal - msIniReal;
 
-        const eIn = redondearHoraInfo(entradaAbierta.time, anclas);
+        let eIn = redondearHoraInfo(entradaAbierta.time, anclas);
+        // Primera entrada del día más tarde de las 08:00 → cuenta como las 08:00
+        // (salvo que ni siquiera hubiera entrado antes de la hora de salida)
+        if (entradaAbierta === primeraEntrada && anclas.length && eIn.valor > ENTRADA_JORNADA && entradaAbierta.time < horaSalida) {
+          eIn = { valor: ENTRADA_JORNADA, redondeada: true };
+        }
+        if (entradaAbierta === primeraEntrada) primeraEntradaContada = eIn.valor;
         const eOut = redondearHoraInfo(horaSalida, anclas);
         if (anclas.length && (!eIn.redondeada || !eOut.redondeada)) algunaSinRedondear = true;
         const msIniRed = new Date(`${fecha}T${eIn.valor}`).getTime();
@@ -1322,7 +1348,7 @@ function calcularHorasPorFichajes(fichajesArr) {
     // de entrada (real para "Horas totales", redondeada para "trabajadas").
     if (esLunJue || esViernes) {
       if (primeraEntrada.time < "10:30:00") msTotal -= 30 * 60000;
-      if (redondearHora(primeraEntrada.time, anclas) < "10:30:00") msTrabajado -= 30 * 60000;
+      if ((primeraEntradaContada || redondearHora(primeraEntrada.time, anclas)) < "10:30:00") msTrabajado -= 30 * 60000;
     }
 
     // Comida de 1h (solo lunes a jueves; el viernes la jornada termina antes
@@ -1645,11 +1671,15 @@ function Informes({ api, showToast, config }) {
         };
       });
       const wsFichajes = hojaConNota(filasFichajes, notaRango);
+      const primeraEntradaDelDia = {}; // "usuario|fecha" -> id de la primera entrada de ese día
+      fichajesOrdenados.forEach((f) => { const k = f.userId + "|" + f.date; if (f.type === "entrada" && !primeraEntradaDelDia[k]) primeraEntradaDelDia[k] = f.id; });
       fichajesOrdenados.forEach((f, i) => {
         if (f.automatico) { pintarFilaRoja(wsFichajes, i, 7); return; }
         const clave = f.userId + "|" + f.date;
         const h = horasPorFichajes[clave];
         if (h && h.idUltimo === f.id && h.sinRedondear) pintarCeldaRoja(wsFichajes, i, 6);
+        // Hora fuera de horario (entrada tarde / salida tarde): se marca la columna "Hora"
+        if (fichajeFueraDeHorario(f, primeraEntradaDelDia[clave] === f.id)) pintarCeldaRoja(wsFichajes, i, 2);
       });
       conFiltro(wsFichajes);
       conFormatoHora(wsFichajes, [5, 6]);
