@@ -74,7 +74,9 @@
     }, 4000);
   });
 </script>
-<style>html,body{margin:0;padding:0;background:#F6F4EF;max-width:100%;overflow-x:hidden;} #root{min-height:100vh;max-width:100%;overflow-x:hidden;}</style>
+<style>html,body{margin:0;padding:0;background:#F6F4EF;max-width:100%;overflow-x:hidden;} #root{min-height:100vh;max-width:100%;overflow-x:hidden;}
+/* TODO EN MAYÚSCULAS (2026-11-24): solo cambia cómo se ve; lo que se escribe se guarda como se escribió */
+html,body,body *,body *::placeholder{text-transform:uppercase !important;}</style>
 </head>
 <body>
 <div id="root"></div>
@@ -589,12 +591,12 @@ function FilaImputacion({ f, opciones, mostrarAuxiliar, cap, onTipo, onConcepto,
         <select className="input" style={{ flex: 1, minWidth: 150 }} value={f.projectId} onChange={(e) => onConcepto(e.target.value)}>
           {sinOpciones && <option value="">— sin {esRecurrente ? "recurrentes" : "pedidos"} —</option>}
           {proyectosF.length > 0 && (
-            <optgroup label="📁 Proyectos">
+            <optgroup label={esRecurrente ? "🔁 Genéricos" : "📁 Proyectos"}>
               {proyectosF.map((o) => <option key={o.id} value={o.id} style={!o.visible ? { color: "var(--warn)" } : undefined}>{o.name}{!o.visible ? " (oculto)" : ""}</option>)}
             </optgroup>
           )}
           {auxiliaresF.length > 0 && (
-            <optgroup label="🔧 Auxiliar">
+            <optgroup label={esRecurrente ? "🔁 Genéricos (fábrica)" : "🔧 Tipos de trabajo"}>
               {auxiliaresF.map((o) => <option key={o.id} value={o.id} style={!o.visible ? { color: "var(--warn)" } : undefined}>{o.name}{!o.visible ? " (oculto)" : ""}</option>)}
             </optgroup>
           )}
