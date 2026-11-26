@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
-<title>onka — Fabricación de mobiliario</title>
+<title>ONKA — FABRICACIÓN DE MOBILIARIO</title>
 <script>
   // Red de seguridad: si ocurre CUALQUIER error de JavaScript no controlado
   // (incluidos fallos del propio traductor de código, antes de que React
@@ -18,7 +18,7 @@
       var root = document.getElementById("root");
       if (!root) { document.addEventListener("DOMContentLoaded", function () { mostrarError(mensaje, detalle); }); return; }
       root.innerHTML =
-        '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;font-family:sans-serif;background:#F6F4EF;">' +
+        '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;font-family:Outfit,sans-serif;background:#F6F4EF;">' +
         '<div style="max-width:480px;text-align:center;">' +
         '<div style="font-size:40px;margin-bottom:12px;">\u26A0\uFE0F</div>' +
         "<h2 style=\"margin-bottom:8px;\">Ha fallado algo al cargar la app</h2>" +
@@ -40,7 +40,7 @@
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black" />
-<meta name="apple-mobile-web-app-title" content="onka" />
+<meta name="apple-mobile-web-app-title" content="ONKA" />
 <meta name="theme-color" content="#0A0A0A" />
 <link rel="icon" href="/icons/icon-192.png" />
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
@@ -62,7 +62,7 @@
         var root = document.getElementById("root");
         if (root && !root.hasChildNodes()) {
           root.innerHTML =
-            '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;font-family:sans-serif;background:#F6F4EF;">' +
+            '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;font-family:Outfit,sans-serif;background:#F6F4EF;">' +
             '<div style="max-width:440px;text-align:center;">' +
             '<div style="font-size:40px;margin-bottom:12px;">📡</div>' +
             "<h2 style=\"margin-bottom:8px;\">No se pudo cargar la aplicación</h2>" +
@@ -74,9 +74,15 @@
     }, 4000);
   });
 </script>
+<!-- TIPOGRAFÍA OUTFIT (2026-11-26) -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400..700&display=swap" />
 <style>html,body{margin:0;padding:0;background:#F6F4EF;max-width:100%;overflow-x:hidden;} #root{min-height:100vh;max-width:100%;overflow-x:hidden;}
 /* TODO EN MAYÚSCULAS (2026-11-24): solo cambia cómo se ve; lo que se escribe se guarda como se escribió */
-html,body,body *,body *::placeholder{text-transform:uppercase !important;}</style>
+html,body,body *,body *::placeholder{text-transform:uppercase !important;}
+/* OUTFIT en toda la app, también en botones, campos y listas (los controles no la heredan solos) */
+html,body,button,input,select,textarea,option,optgroup{font-family:"Outfit",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;}</style>
 </head>
 <body>
 <div id="root"></div>
@@ -87,7 +93,6 @@ const { useState, useEffect, useCallback, useMemo, useRef } = React;
    CSS — Identidad ONKA
 ================================================================= */
 const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
 :root{
   --paper:#F6F4EF; --ink:#0E0E0E; --panel:#FFFFFF; --line:#E4E1D8;
   --primary:#0A0A0A; --primary-dark:#000000; --accent:#A9762E; --accent-ink:#3A2707;
@@ -95,11 +100,11 @@ const CSS = `
   --office:#3B6FA0; --fabrica:#8A5A2B;
 }
 *{box-sizing:border-box;}
-.app{font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;background:var(--paper);color:var(--ink);min-height:100%;max-width:100vw;overflow-x:hidden;}
-.mono{font-family:ui-monospace,SFMono-Regular,"Roboto Mono",monospace;}
-.display{font-family:"Space Grotesk","Segoe UI",sans-serif;}
-h1,h2,h3{font-family:"Space Grotesk","Segoe UI",sans-serif; margin:0; letter-spacing:-0.01em;}
-.btn{border:none;border-radius:9px;padding:10px 16px;font-weight:600;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;gap:8px;transition:transform .08s ease, box-shadow .15s ease;font-family:"Inter",sans-serif;}
+.app{font-family:"Outfit",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;background:var(--paper);color:var(--ink);min-height:100%;max-width:100vw;overflow-x:hidden;}
+.mono{font-family:"Outfit",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;font-variant-numeric:tabular-nums;}
+.display{font-family:"Outfit",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;}
+h1,h2,h3{font-family:"Outfit",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; margin:0; letter-spacing:.02em;}
+.btn{border:none;border-radius:9px;padding:10px 16px;font-weight:600;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;gap:8px;transition:transform .08s ease, box-shadow .15s ease;font-family:"Outfit",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;}
 .btn:active{transform:scale(0.97);}
 .btn:disabled{opacity:.5;cursor:not-allowed;}
 .btn-primary{background:var(--primary);color:#fff;}
@@ -223,7 +228,7 @@ class ErrorBoundary extends React.Component {
   render() {
     if (this.state.error) {
       return (
-        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, background: "var(--paper, #F6F4EF)", fontFamily: "sans-serif" }}>
+        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, background: "var(--paper, #F6F4EF)", fontFamily: "Outfit, sans-serif" }}>
           <div style={{ maxWidth: 480, textAlign: "center" }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>⚠️</div>
             <h2 style={{ marginBottom: 8 }}>Algo ha fallado</h2>
@@ -356,7 +361,7 @@ function Login({ onLogin }) {
         <p style={{ color: "#9A978E", fontSize: 13, marginTop: 4, marginBottom: 16 }}>Selecciona tu usuario para fichar, imputar horas o ver el calendario.</p>
         <label style={{ fontSize: 12.5, fontWeight: 600, color: "#9A978E" }}>Usuario</label>
         <select className="input" style={{ marginTop: 6, marginBottom: 12 }} value={selected} onChange={(e) => cambiarUsuario(e.target.value)}>
-          {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          {users.map((u) => <option key={u.id} value={u.id}>{String(u.name || "").toUpperCase()}</option>)}
         </select>
         <label style={{ fontSize: 12.5, fontWeight: 600, color: "#9A978E" }}>PIN</label>
         <input className="input mono" style={{ marginTop: 6 }} type="password" inputMode="numeric" placeholder="••••" value={pin} onChange={(e) => { setPin(e.target.value); setError(""); }} />
@@ -584,23 +589,23 @@ function FilaImputacion({ f, opciones, mostrarAuxiliar, cap, onTipo, onConcepto,
   return (
     <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
       <select className="input" value={f.tipo} onChange={(e) => onTipo(e.target.value)}>
-        <option value="recurrente">🔁 Recurrente</option>
-        <option value="pedido">📦 Pedido concreto</option>
+        <option value="recurrente">🔁 RECURRENTE</option>
+        <option value="pedido">📦 PEDIDO CONCRETO</option>
       </select>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <select className="input" style={{ flex: 1, minWidth: 150 }} value={f.projectId} onChange={(e) => onConcepto(e.target.value)}>
-          {sinOpciones && <option value="">— sin {esRecurrente ? "recurrentes" : "pedidos"} —</option>}
+          {sinOpciones && <option value="">— SIN {esRecurrente ? "RECURRENTES" : "PEDIDOS"} —</option>}
           {proyectosF.length > 0 && (
-            <optgroup label={esRecurrente ? "🔁 Genéricos" : "📁 Proyectos"}>
-              {proyectosF.map((o) => <option key={o.id} value={o.id} style={!o.visible ? { color: "var(--warn)" } : undefined}>{o.name}{!o.visible ? " (oculto)" : ""}</option>)}
+            <optgroup label={esRecurrente ? "🔁 GENÉRICOS" : "📁 PROYECTOS"}>
+              {proyectosF.map((o) => <option key={o.id} value={o.id} style={!o.visible ? { color: "var(--warn)" } : undefined}>{String(o.name || "").toUpperCase()}{!o.visible ? " (OCULTO)" : ""}</option>)}
             </optgroup>
           )}
           {auxiliaresF.length > 0 && (
-            <optgroup label={esRecurrente ? "🔁 Genéricos (fábrica)" : "🔧 Tipos de trabajo"}>
-              {auxiliaresF.map((o) => <option key={o.id} value={o.id} style={!o.visible ? { color: "var(--warn)" } : undefined}>{o.name}{!o.visible ? " (oculto)" : ""}</option>)}
+            <optgroup label={esRecurrente ? "🔁 GENÉRICOS (FÁBRICA)" : "🔧 TIPOS DE TRABAJO"}>
+              {auxiliaresF.map((o) => <option key={o.id} value={o.id} style={!o.visible ? { color: "var(--warn)" } : undefined}>{String(o.name || "").toUpperCase()}{!o.visible ? " (OCULTO)" : ""}</option>)}
             </optgroup>
           )}
-          {extra.map((o) => <option key={o.id} value={o.id} style={{ color: "var(--warn)" }}>{o.name} (oculto)</option>)}
+          {extra.map((o) => <option key={o.id} value={o.id} style={{ color: "var(--warn)" }}>{String(o.name || "").toUpperCase()} (OCULTO)</option>)}
         </select>
         <input className="input mono" style={{ width: 92 }} type="number" step="0.25" min="0" max={cap || 24} placeholder="h" value={f.hours} onChange={(e) => onHoras(e.target.value)} />
         <button className="btn btn-danger btn-sm" onClick={onRemove}><Trash2 size={14} /></button>
@@ -1072,9 +1077,9 @@ function FormularioEvento({ fecha, users, onCancel, onSave }) {
     <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 14 }}>
       <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>Tipo</label>
       <select className="input" style={{ margin: "6px 0 10px" }} value={tipo} onChange={(e) => setTipo(e.target.value)}>
-        <option value="evento">Evento / Reunión</option>
-        <option value="festivo">Festivo</option>
-        <option value="vacaciones">Vacaciones</option>
+        <option value="evento">EVENTO / REUNIÓN</option>
+        <option value="festivo">FESTIVO</option>
+        <option value="vacaciones">VACACIONES</option>
       </select>
 
       <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>Título</label>
@@ -1097,9 +1102,9 @@ function FormularioEvento({ fecha, users, onCancel, onSave }) {
         <>
           <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>Ámbito</label>
           <select className="input" style={{ margin: "6px 0 10px" }} value={ambito} onChange={(e) => setAmbito(e.target.value)}>
-            <option value="nacional">Nacional (afecta a todos, elimina la alerta de fichaje)</option>
-            <option value="autonomico">Autonómico (afecta a todos, elimina la alerta de fichaje)</option>
-            <option value="local">Local (informativo — NO elimina la alerta de fichaje)</option>
+            <option value="nacional">NACIONAL (AFECTA A TODOS, ELIMINA LA ALERTA DE FICHAJE)</option>
+            <option value="autonomico">AUTONÓMICO (AFECTA A TODOS, ELIMINA LA ALERTA DE FICHAJE)</option>
+            <option value="local">LOCAL (INFORMATIVO — NO ELIMINA LA ALERTA DE FICHAJE)</option>
           </select>
           {ambito !== "nacional" && (
             <>
@@ -1749,9 +1754,9 @@ function Informes({ api, showToast, config }) {
           <div>
             <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>Empresa</label>
             <select className="input" style={{ marginTop: 4 }} value={empresaFiltro} onChange={(e) => setEmpresaFiltro(e.target.value)}>
-              <option value="todas">Todas las empresas</option>
-              <option value="ONKA">Solo ONKA</option>
-              <option value="ALACANT">Solo Alacant Contract</option>
+              <option value="todas">TODAS LAS EMPRESAS</option>
+              <option value="ONKA">SOLO ONKA</option>
+              <option value="ALACANT">SOLO ALACANT CONTRACT</option>
             </select>
           </div>
           <button className="btn btn-primary" onClick={exportarExcel} disabled={cargando || exportando}><Download size={14} /> {exportando ? "Exportando…" : "Exportar a Excel"}</button>
@@ -1858,13 +1863,13 @@ function GestionUsuarios({ api, refreshConfig, showToast, esAdminRol }) {
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <input className="input" style={{ flex: 2, minWidth: 160 }} placeholder="Nombre" value={nombre} onChange={(e) => setNombre(e.target.value)} />
           <select className="input" style={{ flex: 1, minWidth: 140 }} value={role} onChange={(e) => setRole(e.target.value)}>
-            <option value="oficina">Oficina</option>
-            <option value="fabrica">Fábrica</option>
-            <option value="admin">Administrador</option>
+            <option value="oficina">OFICINA</option>
+            <option value="fabrica">FÁBRICA</option>
+            <option value="admin">ADMINISTRADOR</option>
           </select>
           <select className="input" style={{ flex: 1, minWidth: 150 }} value={company} onChange={(e) => setCompany(e.target.value)}>
-            <option value="ONKA">Empresa: ONKA</option>
-            <option value="ALACANT">Empresa: Alacant Contract</option>
+            <option value="ONKA">EMPRESA: ONKA</option>
+            <option value="ALACANT">EMPRESA: ALACANT CONTRACT</option>
           </select>
           <input className="input mono" style={{ width: 90 }} placeholder="PIN" value={pin} onChange={(e) => setPin(e.target.value)} />
           <button className="btn btn-primary" onClick={addUser}><Plus size={14} /> Añadir</button>
@@ -1883,18 +1888,18 @@ function GestionUsuarios({ api, refreshConfig, showToast, esAdminRol }) {
                   </div>
                   <div style={{ fontSize: 12, color: "var(--muted)" }}>{roleLabels[u.role]} · PIN <span className="mono">{u.pin}</span></div>
                 </div>
-                {u.role !== "admin" && <button className="btn btn-danger btn-sm" style={{ flexShrink: 0 }} onClick={() => delUser(u.id)} title="Eliminar"><Trash2 size={13} /></button>}
+                {u.role !== "admin" && <button className="btn btn-danger btn-sm" style={{ flexShrink: 0 }} onClick={() => delUser(u.id)} title="ELIMINAR"><Trash2 size={13} /></button>}
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10, alignItems: "center" }}>
                 <select className="input" style={{ width: "auto", fontSize: 12.5, padding: "6px 8px" }} value={u.company || "ONKA"} onChange={(e) => cambiarEmpresa(u.id, e.target.value)}>
-                  <option value="ONKA">Empresa: ONKA</option>
-                  <option value="ALACANT">Empresa: Alacant Contract</option>
+                  <option value="ONKA">EMPRESA: ONKA</option>
+                  <option value="ALACANT">EMPRESA: ALACANT CONTRACT</option>
                 </select>
                 {u.role !== "admin" && (
                   <>
                     <button className={`btn btn-sm ${respProy.includes(u.id) ? "btn-accent" : "btn-ghost"}`} onClick={() => toggleRespProy(u.id)}><ShieldCheck size={13} /> Resp. proyectos</button>
                     <button className={`btn btn-sm ${respAux.includes(u.id) ? "btn-accent" : "btn-ghost"}`} onClick={() => toggleRespAux(u.id)}><ShieldCheck size={13} /> Resp. auxiliares</button>
-                    {esAdminRol && <button className={`btn btn-sm ${administradores.includes(u.id) ? "btn-primary" : "btn-ghost"}`} onClick={() => toggleAdministrador(u.id)} title="Acceso completo al panel de administración"><Settings size={13} /> Administrador</button>}
+                    {esAdminRol && <button className={`btn btn-sm ${administradores.includes(u.id) ? "btn-primary" : "btn-ghost"}`} onClick={() => toggleAdministrador(u.id)} title="ACCESO COMPLETO AL PANEL DE ADMINISTRACIÓN"><Settings size={13} /> Administrador</button>}
                   </>
                 )}
               </div>
@@ -1941,8 +1946,8 @@ function GestionFamilia({ api, config, refreshConfig, showToast, familia }) {
       <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
         <input className="input" style={{ flex: 1, minWidth: 180 }} placeholder="Nombre del nuevo proyecto o trabajo" value={nombre} onChange={(e) => setNombre(e.target.value)} />
         <select className="input" style={{ width: "auto", minWidth: 150 }} value={nuevoTipo} onChange={(e) => setNuevoTipo(e.target.value)}>
-          <option value="pedido">📦 Pedido concreto</option>
-          <option value="recurrente">🔁 Recurrente</option>
+          <option value="pedido">📦 PEDIDO CONCRETO</option>
+          <option value="recurrente">🔁 RECURRENTE</option>
         </select>
         <button className="btn btn-primary" onClick={addItem}><Plus size={14} /> Añadir</button>
       </div>
@@ -1954,8 +1959,8 @@ function GestionFamilia({ api, config, refreshConfig, showToast, familia }) {
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <input className="input" style={{ flex: 1, minWidth: 140 }} value={nombreEdit} onChange={(e) => setNombreEdit(e.target.value)} autoFocus />
                   <select className="input" style={{ width: "auto" }} value={tipoEdit} onChange={(e) => setTipoEdit(e.target.value)}>
-                    <option value="pedido">📦 Pedido concreto</option>
-                    <option value="recurrente">🔁 Recurrente</option>
+                    <option value="pedido">📦 PEDIDO CONCRETO</option>
+                    <option value="recurrente">🔁 RECURRENTE</option>
                   </select>
                   <button className="btn btn-primary btn-sm" onClick={() => guardarEdicion(it.id)}><Check size={13} /></button>
                   <button className="btn btn-ghost btn-sm" onClick={() => setEditandoId(null)}><X size={13} /></button>
@@ -1965,8 +1970,8 @@ function GestionFamilia({ api, config, refreshConfig, showToast, familia }) {
               <>
                 <td className="td-clip" style={it.fixed ? estiloOpcionFija : undefined}>{it.name}{it.visible === false && <span className="pill" style={{ marginLeft: 8, background: "#EEECE6", color: "var(--muted)" }}>Oculto</span>}</td>
                 <td className="td-actions" style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
-                  <button className={`btn btn-sm ${it.visible === false ? "btn-ghost" : "btn-accent"}`} onClick={() => toggleVisible(it)} title={it.visible === false ? "Mostrar en la imputación" : "Ocultar de la imputación"}>{it.visible === false ? <EyeOff size={13} /> : <Eye size={13} />}</button>
-                  <button className="btn btn-ghost btn-sm" onClick={() => empezarEdicion(it)} title="Editar nombre y tipo"><Settings size={13} /></button>
+                  <button className={`btn btn-sm ${it.visible === false ? "btn-ghost" : "btn-accent"}`} onClick={() => toggleVisible(it)} title={it.visible === false ? "MOSTRAR EN LA IMPUTACIÓN" : "OCULTAR DE LA IMPUTACIÓN"}>{it.visible === false ? <EyeOff size={13} /> : <Eye size={13} />}</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => empezarEdicion(it)} title="EDITAR NOMBRE Y TIPO"><Settings size={13} /></button>
                   <button className="btn btn-danger btn-sm" onClick={() => delItem(it.id)}><Trash2 size={13} /></button>
                 </td>
               </>
